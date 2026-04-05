@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchem import ARRAY, DateTime, Enum, ForeignKey, Integer, Numeric, UniqueConstraint
+from sqlalchemy import ARRAY, DateTime, Enum, ForeignKey, Integer, Numeric, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -25,9 +25,9 @@ class TriggerPrediction(Base):
     first_detected: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_updated: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     status: Mapped[TriggerStatus] = mapped_column(
-        Enum(TriggerStatus, name="trigger_status_enum", create_type=False), default=TriggerStatus.SUSPECT
+        Enum(TriggerStatus, name="trigger_status_enum", create_type=False), default=TriggerStatus.SUSPECTED
     )
-    symptom_types: Mapped[list[str] | None] = mapped_column(ARRAY(Enum(SymptomType, name="symptom_type_enum", create_type=False))))
+    symptom_types: Mapped[list[str] | None] = mapped_column(ARRAY(Enum(SymptomType, name="symptom_type_enum", create_type=False)))
     average_time_lag_minutes: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
