@@ -1,0 +1,5 @@
+{
+  "version": "2.0.1",
+  "last_updated": "2024-01-15",
+  "foods": [{"food_id": "cereal-1", "name": "WHEAT"}, {"food_id": "cereal-2", "name": "OATS"}]
+}
