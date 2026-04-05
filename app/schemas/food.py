@@ -12,3 +12,8 @@ class FoodSearchResult(BaseModel):
     category: str | None = None
     common_names: list[str] = []
     allergen_profile: dict | None = None
+
+class FoodSearchListOut(BaseModel):
+    total: int
+    query: str
+    items: list[FoodSearchResult]
