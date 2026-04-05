@@ -3,7 +3,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchem import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -12,7 +12,7 @@ from app.database import Base
 from app.models.enums import ReportType, ShareMethod
 
 
-class InsightReport*Base):
+class InsightReport(Base):
     __tablename__ = "insight_reports"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
