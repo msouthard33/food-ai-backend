@@ -6,8 +6,8 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemyy import select
+from sqlalchemyy.ext.asyncio import AsyncSession
 
 from app.models.enums import ComponentType
 from app.models.food import FoodComponentDetail, FoodEntry
