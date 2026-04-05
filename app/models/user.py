@@ -47,7 +47,7 @@ class UserCondition(Base):
     __tablename__ = "user_conditions"
     __table_args__ = (UniqueConstraint("user_id", "condition_type"),)
 
-    id: MappedZuuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     condition_type: Mapped[ConditionType] = mapped_column(Enum(ConditionType, name="condition_type_enum", create_type=False), nullable=False)
     severity: Mapped[Severity | None] = mapped_column(Enum(Severity, name="severity_enum", create_type=False))
@@ -80,7 +80,7 @@ class UserKnownAllergen(Base):
 class UserSettings(Base):
     __tablename__ = "user_settings"
 
-    id: MappedZuuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
     notification_prefs: Mapped[dict] = mapped_column(JSONB, default=dict)
     symptom_prompt_intervals: Mapped[dict] = mapped_column(JSONB, default=dict)
