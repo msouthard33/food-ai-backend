@@ -95,7 +95,7 @@ class AIConversation(Base):
     )
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    metadata: Mapped[dict | None] = mapped_column(JSONB)
+    extra_metadata: Mapped[dict | None] = mapped_column(JSONB, name="metadata")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     meal: Mapped["Meal"] = relationship(back_populates="ai_conversations")
