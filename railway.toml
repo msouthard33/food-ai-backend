@@ -5,4 +5,4 @@ dockerfile = "./Dockerfile"
 [deploy]
 startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
 restartPolicy = "always"
-healthcheck = { path = "/health", interval = 10 }
+healthcheck = { path = "/ready", interval = 10 }
