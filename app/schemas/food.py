@@ -1,9 +1,8 @@
 """Food request/response schemas."""
 
 import uuid
-from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict
 
 
 class FoodSearchResult(BaseModel):
@@ -12,6 +11,10 @@ class FoodSearchResult(BaseModel):
     category: str | None = None
     common_names: list[str] = []
     allergen_profile: dict | None = None
+
+    # Required to deserialize from SQLAlchemy ORM objects
+    model_config = ConfigDict(from_attributes=True)
+
 
 class FoodSearchListOut(BaseModel):
     total: int

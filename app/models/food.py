@@ -10,7 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.database import Base
-from app.models.enums import ComponentSource, ComponentType
+from app.models.enums import ComponentType
 
 
 class FoodEntry(Base):
@@ -27,7 +27,10 @@ class FoodEntry(Base):
     date_added: Mapped[date | None] = mapped_column(Date)
 
     components: Mapped[list["FoodComponentDetail"]] = relationship(
-        "FoodComponentDetail", back_populates="food_entry", cascade="all, delete-orphan"
+        "FoodComponentDetail",
+        back_populates="food_entry",
+        cascade="all, delete-orphan",
+        foreign_keys="FoodComponentDetail.food_entry_id",
     )
 
 
@@ -36,7 +39,7 @@ class ComponentDefinition(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     component_type: Mapped[ComponentType] = mapped_column(
-        Enum(ComponentType, name="componenttype"), nullable=False, unique=True
+        Enum(ComponentType, name="component_type_enum", create_type=False), nullable=False, unique=True
     )
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
@@ -46,26 +49,30 @@ class ComponentDefinition(Base):
 class FoodComponentDetail(Base):
     __tablename__ = "food_component_details"
     __table_args__ = (
-        UniqueConstraint("food_entry_id", "component_type", name="uq_food_component"),
+        UniqueConstraint("food_id", "component_type", name="uq_food_component"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # DB column name is "food_id"; Python attribute is "food_entry_id" for consistency with the FK
     food_entry_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("food_database.id", ondelete="CASCADE"), nullable=False
+        "food_id",
+        UUID(as_uuid=True),
+        ForeignKey("food_database.id", ondelete="CASCADE"),
+        nullable=False,
     )
     component_type: Mapped[ComponentType] = mapped_column(
-        Enum(ComponentType, name="componenttype"), nullable=False
+        Enum(ComponentType, name="component_type_enum", create_type=False), nullable=False
     )
-    level: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
-    source: Mapped[ComponentSource] = mapped_column(
-        Enum(ComponentSource, name="componentsource"),
-        nullable=False,
-        default=ComponentSource.KNOWLEDGE_BASE,
-    )
+    # DB column name is "level_score"; Python attribute is "level"
+    level: Mapped[Decimal | None] = mapped_column("level_score", Numeric(3, 1))
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    food_entry: Mapped["FoodEntry"] = relationship("FoodEntry", back_populates="components")
+    food_entry: Mapped["FoodEntry"] = relationship(
+        "FoodEntry",
+        back_populates="components",
+        foreign_keys=[food_entry_id],
+    )

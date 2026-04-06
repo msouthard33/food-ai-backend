@@ -1,14 +1,12 @@
 """Meal logging endpoints."""
 
-import base64
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import PaginationParams, get_current_user
-from app.models.enums import ProcessingStatus
 from app.models.user import User
 from app.schemas.meal import MealCreate, MealItemBatchCreate, MealItemOut, MealListOut, MealOut
 from app.services import meal_service
@@ -24,20 +22,14 @@ router = APIRouter(prefix="/api/v1/meals", tags=["meals"])
 )
 async def create_meal(
     data: MealCreate,
-    photo: UploadFile | None = File(None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> MealOut:
+    """Create a new meal log entry.
+
+    Photo upload is handled via a separate PATCH /api/v1/meals/{meal_id}/photo endpoint (coming soon).
+    """
     meal = await meal_service.create_meal(db, user.id, data)
-
-    # If a photo was uploaded, store it and kick off async processing
-    if photo:
-        # In production this uploads to Supabase Storage; for now store a placeholder
-        photo_bytes = await photo.read()
-        meal.photo_url = f"pending://meal-photos/{meal.id}/{photo.filename}"
-        meal.processing_status = ProcessingStatus.PENDING
-        # TODO: dispatch background task for AI photo analysis
-
     return MealOut.model_validate(meal)
 
 

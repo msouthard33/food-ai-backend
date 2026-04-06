@@ -67,22 +67,27 @@ class ComponentType(str, enum.Enum):
     LACTOSE = "lactose"
     FRUCTOSE = "fructose"
     LECTINS = "lectins"
+    WHEAT = "wheat"
+    SESAME = "sesame"
+    NIGHTSHADES = "nightshades"
+    ALCOHOL = "alcohol"
     OTHER = "other"
 
 
 class ComponentSource(str, enum.Enum):
-    USDA = "usda"
-    KNOWLEDGE_BASE = "knowledge_base"
-    AI_ANALYSIS = "ai_analysis"
-    USER_INPUT = "user_input"
+    # Values match the DB component_source_enum
+    DATABASE = "database"
+    AI_INFERRED = "ai_inferred"
+    USER_REPORTED = "user_reported"
+    RESEARCH_BASED = "research_based"
 
 
 class ReportType(str, enum.Enum):
+    # Values match the DB report_type_enum
     WEEKLY = "weekly"
     MONTHLY = "monthly"
-    TRIGGER_ANALYSIS = "trigger_analysis"
-    SYMPTOM_SUMMARY = "symptom_summary"
     CUSTOM = "custom"
+    CLINICIAN = "clinician"
 
 
 class Severity(str, enum.Enum):
@@ -93,12 +98,15 @@ class Severity(str, enum.Enum):
 
 
 class ShareMethod(str, enum.Enum):
-    EMAIL = "email"
+    # Values match the DB share_method_enum
     LINK = "link"
     PDF = "pdf"
+    IN_APP = "in_app"
 
 
 class TriggerStatus(str, enum.Enum):
-    SUSPECTED = "suspected"
+    # Values match the DB trigger_status_enum
+    SUSPECT = "suspect"
+    PROBABLE = "probable"
     CONFIRMED = "confirmed"
-    RULED_OUT = "ruled_out"
+    CLEARED = "cleared"

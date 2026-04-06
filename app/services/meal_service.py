@@ -1,22 +1,25 @@
 """Meal CRUD operations."""
 
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.meal import Meal, MealItem, MealItemComponent
-from app.models.enums import ComponentSource
 from app.models.food import FoodComponentDetail
+from app.models.enums import MealType
 from app.schemas.meal import MealCreate, MealItemCreate
 
 
 async def create_meal(db: AsyncSession, user_id: uuid.UUID, data: MealCreate) -> Meal:
     meal = Meal(
         user_id=user_id,
-        timestamp=data.timestamp,
-        meal_type=data.meal_type,
+        # Default to current time if not provided; Meal.timestamp is non-nullable
+        timestamp=data.timestamp or datetime.now(timezone.utc),
+        # Default to SNACK if not provided; Meal.meal_type is non-nullable
+        meal_type=data.meal_type or MealType.SNACK,
         raw_description=data.raw_description,
     )
     db.add(meal)
@@ -67,29 +70,29 @@ async def add_meal_items(
     for item_data in items_data:
         meal_item = MealItem(
             meal_id=meal_id,
-            food_name=item_data.food_name,
-            food_database_id=item_data.food_database_id,
+            name=item_data.name,
+            food_entry_id=None,  # No food_database_id in MealItemCreate; can be linked later
             quantity=item_data.quantity,
             unit=item_data.unit,
             preparation_method=item_data.preparation_method,
-            brand=item_data.brand,
-            confidence_score=item_data.confidence_score,
+            raw_text=item_data.raw_text,
+            # confidence_score uses model default (Decimal("0.0"))
         )
         db.add(meal_item)
         await db.flush()
 
-        # Auto-populate allergen components from the food database
-        if item_data.food_database_id:
+        # Auto-populate allergen components from the food database if food_entry_id is set
+        if meal_item.food_entry_id:
             component_q = select(FoodComponentDetail).where(
-                FoodComponentDetail.food_id == item_data.food_database_id
+                FoodComponentDetail.food_entry_id == meal_item.food_entry_id
             )
             components = (await db.execute(component_q)).scalars().all()
             for comp in components:
                 mic = MealItemComponent(
                     meal_item_id=meal_item.id,
                     component_type=comp.component_type,
-                    level=comp.level_score or 0,
-                    source=ComponentSource.DATABASE,
+                    estimated_level=comp.level or 0,
+                    # confidence_score uses model default
                 )
                 db.add(mic)
 

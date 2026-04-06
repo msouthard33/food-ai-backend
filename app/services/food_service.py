@@ -40,7 +40,8 @@ async def search_foods(
         count_base = count_base.where(func.lower(FoodEntry.category) == category.lower())
 
     total = (await db.execute(count_base)).scalar_one()
-    q = base.options(selectinload(FoodEntry.component_details)).limit(limit)
+    # Fix: use FoodEntry.components (correct relationship name), not FoodEntry.component_details
+    q = base.options(selectinload(FoodEntry.components)).limit(limit)
     result = await db.execute(q)
     foods = list(result.scalars().unique().all())
     return foods, total
@@ -50,7 +51,7 @@ async def get_food_by_id(db: AsyncSession, food_id: uuid.UUID) -> FoodEntry | No
     q = (
         select(FoodEntry)
         .where(FoodEntry.id == food_id)
-        .options(selectinload(FoodEntry.component_details))
+        .options(selectinload(FoodEntry.components))
     )
     result = await db.execute(q)
     return result.scalar_one_or_none()
