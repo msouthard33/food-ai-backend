@@ -82,7 +82,7 @@ def upgrade() -> None:
         )
         op.execute(
             f'CREATE POLICY "{policy}" ON public."{t}" '
-            f"FOR SELECT TO anon, authenticated USING (true);"
+            f"FOR SELECT USING (true);"
         )
 
 
