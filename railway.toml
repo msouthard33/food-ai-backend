@@ -3,6 +3,7 @@ builder = "dockerfile"
 dockerfile = "./Dockerfile"
 
 [deploy]
+preDeployCommand = "alembic upgrade head"
 startCommand = "sh -c 'uvicorn app.main:app --host 0.0.0.0 --port $PORT'"
 restartPolicy = "always"
 healthcheckPath = "/health"
