@@ -5,8 +5,8 @@ from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_generate_report(client: AsyncClient):
-    resp = await client.post(
+async def test_generate_report(authed_client: AsyncClient):
+    resp = await authed_client.post(
         "/api/v1/reports/generate",
         json={
             "report_type": "weekly",

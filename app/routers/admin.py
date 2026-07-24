@@ -3,10 +3,12 @@
 import logging
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
+from app.models.food import FoodEntry
 from app.services.food_ingestion import ingest_allergen_knowledge_base
 
 logger = logging.getLogger(__name__)
@@ -27,6 +29,24 @@ def verify_admin_key(x_admin_key: str = Header(..., description="Admin API key")
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid admin API key",
         )
+
+
+@router.get(
+    "/foods/count",
+    response_model=dict,
+    summary="Get total food count in the database",
+    dependencies=[Depends(verify_admin_key)],
+)
+async def get_foods_count(
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Return the total number of foods in the knowledge base.
+
+    Requires X-Admin-Key header matching the configured admin_api_key.
+    """
+    result = await db.execute(select(func.count()).select_from(FoodEntry))
+    count = result.scalar_one()
+    return {"count": count}
 
 
 @router.post(

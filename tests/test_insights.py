@@ -5,8 +5,8 @@ from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_get_triggers_empty(client: AsyncClient):
-    resp = await client.get("/api/v1/insights/triggers")
+async def test_get_triggers_empty(authed_client: AsyncClient):
+    resp = await authed_client.get("/api/v1/insights/triggers")
     assert resp.status_code == 200
     data = resp.json()
     assert data["total"] == 0

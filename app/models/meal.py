@@ -79,6 +79,12 @@ class MealItemComponent(Base):
     component_type: Mapped[ComponentType] = mapped_column(
         Enum(ComponentType, name="componenttype"), nullable=False
     )
+    # estimated_level: allergen/compound load score on a 0–100 scale.
+    # 0 = trace/undetectable, 100 = maximum known load for this component.
+    # Scores are relative within a component type (not cross-component comparable).
+    # Source: KB allergen_profile score values (0–100) mapped 1:1 during ingestion.
+    # Daily load aggregation: sum scores within a ComponentType across meals in a day.
+    # Threshold interpretation: scores >= 60 represent high daily load for most components.
     estimated_level: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
     confidence_score: Mapped[Decimal] = mapped_column(Numeric(3, 2), default=Decimal("0.0"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
