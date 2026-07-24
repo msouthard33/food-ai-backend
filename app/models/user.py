@@ -13,6 +13,7 @@ from sqlalchemy import (
     Text,
     Time,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -30,7 +31,9 @@ class User(Base):
     display_name: Mapped[str | None] = mapped_column(String(255))
     timezone: Mapped[str] = mapped_column(String(63), default="UTC")
     onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False)
-    is_synthetic: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_synthetic: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false(), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
