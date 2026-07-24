@@ -14,7 +14,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
 from app.middleware.audit_log import AuditLogMiddleware
-from app.routers import admin, barcode, fhir, foods, health, insights, meals, medications, protocols, reports, symptoms, users
+from app.routers import admin, barcode, export, fhir, foods, health, insights, meals, medications, protocols, reports, symptoms, users
 
 settings = get_settings()
 
@@ -154,6 +154,7 @@ app.include_router(foods.router)
 app.include_router(insights.router)
 app.include_router(protocols.router)
 app.include_router(fhir.router)
+app.include_router(export.router)
 app.include_router(reports.router)
 app.include_router(barcode.router)
 app.include_router(admin.router)

@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -25,6 +26,9 @@ from app.models.enums import SymptomType
 
 class SymptomScore(Base):
     __tablename__ = "symptom_scores"
+    # Composite index accelerates the per-user, time-ranged symptom scans used by the
+    # insights leaderboard, lag-correlation, and data-export queries.
+    __table_args__ = (Index("ix_symptom_scores_user_timestamp", "user_id", "timestamp"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -48,6 +52,8 @@ class SymptomScore(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    # Soft delete — non-null marks the row as deleted; excluded from insights/export.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     user: Mapped["User"] = relationship(back_populates="symptom_scores")  # type: ignore[name-defined]
 

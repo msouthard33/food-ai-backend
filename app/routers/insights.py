@@ -1,16 +1,15 @@
 """Trigger insights endpoints — lag correlation, suspect foods, triggers."""
 
-import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, case, func, select
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models.meal import Meal, MealItem, MealItemComponent
+from app.models.meal import Meal
 from app.models.symptom import SymptomScore
 from app.models.user import User
 from app.schemas.insights import (
@@ -21,6 +20,11 @@ from app.schemas.insights import (
 )
 from app.schemas.trigger import TriggerListOut, TriggerPredictionOut
 from app.services import trigger_service
+from app.services.medication_service import (
+    get_medicated_symptom_map,
+    medication_adjusted_score,
+)
+from app.utils.confidence import evidence_confidence_label, wilson_interval
 
 router = APIRouter(prefix="/api/v1/insights", tags=["insights"])
 
@@ -32,7 +36,9 @@ router = APIRouter(prefix="/api/v1/insights", tags=["insights"])
 )
 async def get_triggers(
     status_filter: str | None = Query(
-        None, alias="status", description="Filter by trigger status (suspect, probable, confirmed, cleared)"
+        None,
+        alias="status",
+        description="Filter by trigger status (suspect, probable, confirmed, cleared)",
     ),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -65,10 +71,16 @@ async def get_lag_correlation(
     windows = [24, 48, 72]
     rows: list[LagCorrelationRow] = []
 
-    # Fetch all symptoms in range
+    # Fetch all (non-deleted) symptoms in range
     symptom_result = await db.execute(
         select(SymptomScore)
-        .where(and_(SymptomScore.user_id == user.id, SymptomScore.timestamp >= cutoff))
+        .where(
+            and_(
+                SymptomScore.user_id == user.id,
+                SymptomScore.timestamp >= cutoff,
+                SymptomScore.deleted_at.is_(None),
+            )
+        )
         .order_by(SymptomScore.timestamp)
     )
     symptoms = list(symptom_result.scalars().all())
@@ -76,17 +88,28 @@ async def get_lag_correlation(
     if not symptoms:
         return LagCorrelationOut(correlations=[], total=0)
 
-    # Fetch all meals with items in range (go back further to cover max window)
+    # Fetch all (non-deleted) meals with items in range (go back further to cover max window)
     meal_cutoff = cutoff - timedelta(hours=max(windows))
     meal_result = await db.execute(
         select(Meal)
-        .where(and_(Meal.user_id == user.id, Meal.timestamp >= meal_cutoff))
+        .where(
+            and_(
+                Meal.user_id == user.id,
+                Meal.timestamp >= meal_cutoff,
+                Meal.deleted_at.is_(None),
+            )
+        )
         .options(selectinload(Meal.items))
     )
     meals = list(meal_result.scalars().unique().all())
 
-    # Build correlation buckets: (window, food_name, symptom_type) -> count
-    buckets: dict[tuple[int, str, str], int] = {}
+    # Which symptom episodes were medicated? (covariate — see medication_service)
+    medicated_map = await get_medicated_symptom_map(
+        db, user.id, [s.id for s in symptoms]
+    )
+
+    # Build correlation buckets: (window, food_name, symptom_type) -> {count, symptom_ids}
+    buckets: dict[tuple[int, str, str], dict] = {}
 
     for symptom in symptoms:
         for window_hours in windows:
@@ -95,13 +118,17 @@ async def get_lag_correlation(
                 if window_start <= meal.timestamp <= symptom.timestamp:
                     for item in meal.items:
                         key = (window_hours, item.name, str(symptom.symptom_type))
-                        buckets[key] = buckets.get(key, 0) + 1
+                        bucket = buckets.setdefault(key, {"count": 0, "symptom_ids": set()})
+                        bucket["count"] += 1
+                        bucket["symptom_ids"].add(symptom.id)
 
-    for (window_hours, food_name, symptom_name), sample_size in buckets.items():
+    for (window_hours, food_name, symptom_name), bucket in buckets.items():
+        sample_size = bucket["count"]
         if sample_size >= 2:
             # Correlation score: simple frequency normalized to 0-100
             total_symptom_count = len(symptoms)
             score = min(100.0, (sample_size / max(total_symptom_count, 1)) * 100)
+            n_medicated = sum(1 for sid in bucket["symptom_ids"] if sid in medicated_map)
             rows.append(
                 LagCorrelationRow(
                     window_hours=window_hours,
@@ -109,6 +136,8 @@ async def get_lag_correlation(
                     symptom_name=symptom_name,
                     correlation_score=round(score, 2),
                     sample_size=sample_size,
+                    n_medicated_episodes=n_medicated,
+                    medication_confounded=n_medicated > 0,
                 )
             )
 
@@ -128,31 +157,50 @@ async def get_suspect_foods(
 ) -> SuspectFoodsOut:
     """Return foods ranked by trigger correlation score.
 
-    Only foods with sample_size >= 3 are included.
-    confidence_tier uses the D9 mapping.
+    Only foods that preceded >= 3 distinct symptom episodes are included. Every entry
+    carries a medication-adjusted ``combined_score``, a 95% Wilson confidence interval,
+    the ``n_meals`` / ``n_symptom_episodes`` sample sizes, medication-covariate counts,
+    and a plain-English ``confidence_label`` (Day-One Value honest-confidence doctrine).
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
 
-    # Fetch symptoms
+    # Fetch (non-deleted) symptoms
     symptom_result = await db.execute(
-        select(SymptomScore)
-        .where(and_(SymptomScore.user_id == user.id, SymptomScore.timestamp >= cutoff))
+        select(SymptomScore).where(
+            and_(
+                SymptomScore.user_id == user.id,
+                SymptomScore.timestamp >= cutoff,
+                SymptomScore.deleted_at.is_(None),
+            )
+        )
     )
     symptoms = list(symptom_result.scalars().all())
 
     if not symptoms:
         return SuspectFoodsOut(foods=[], total=0)
 
-    # Fetch meals with items
+    # Fetch (non-deleted) meals with items, reaching back 72h before the window so a
+    # meal just before the cutoff can still precede an early symptom.
     meal_result = await db.execute(
         select(Meal)
-        .where(and_(Meal.user_id == user.id, Meal.timestamp >= cutoff - timedelta(hours=72)))
+        .where(
+            and_(
+                Meal.user_id == user.id,
+                Meal.timestamp >= cutoff - timedelta(hours=72),
+                Meal.deleted_at.is_(None),
+            )
+        )
         .options(selectinload(Meal.items))
     )
     meals = list(meal_result.scalars().unique().all())
 
-    # Count how many symptom events each food preceded (within 72h window)
-    food_counts: dict[str, int] = {}
+    # Which symptom episodes were medicated? (covariate — see medication_service)
+    medicated_map = await get_medicated_symptom_map(
+        db, user.id, [s.id for s in symptoms]
+    )
+
+    # Per food: distinct symptom episodes it preceded (within 72h) and their ids.
+    food_episode_ids: dict[str, set] = {}
     for symptom in symptoms:
         window_start = symptom.timestamp - timedelta(hours=72)
         seen_foods: set[str] = set()
@@ -161,22 +209,50 @@ async def get_suspect_foods(
                 for item in meal.items:
                     seen_foods.add(item.name)
         for food_name in seen_foods:
-            food_counts[food_name] = food_counts.get(food_name, 0) + 1
+            food_episode_ids.setdefault(food_name, set()).add(symptom.id)
+
+    # Base-rate denominator: distinct meals in the lookback window containing each food.
+    food_meal_counts: dict[str, int] = {}
+    for meal in meals:
+        if meal.timestamp < cutoff:
+            continue  # only count meals inside the reported lookback window
+        for food_name in {item.name for item in meal.items}:
+            food_meal_counts[food_name] = food_meal_counts.get(food_name, 0) + 1
 
     total_symptom_events = len(symptoms)
     result_foods: list[SuspectFoodRow] = []
 
-    for food_name, sample_size in food_counts.items():
-        if sample_size < 3:
+    for food_name, episode_ids in food_episode_ids.items():
+        n_symptom_episodes = len(episode_ids)
+        if n_symptom_episodes < 3:
             continue
-        trigger_score = min(100.0, (sample_size / max(total_symptom_events, 1)) * 100)
+
+        trigger_score = min(100.0, (n_symptom_episodes / max(total_symptom_events, 1)) * 100)
+
+        n_medicated = sum(1 for sid in episode_ids if sid in medicated_map)
+        combined_score = medication_adjusted_score(
+            trigger_score, n_symptom_episodes, n_medicated
+        )
+
+        ci_low_p, ci_high_p = wilson_interval(n_symptom_episodes, total_symptom_events)
+        ci_low, ci_high = ci_low_p * 100, ci_high_p * 100
+        confidence_label = evidence_confidence_label(n_symptom_episodes, ci_high - ci_low)
+
         result_foods.append(
             SuspectFoodRow(
                 food_name=food_name,
                 trigger_score=round(trigger_score, 2),
-                sample_size=sample_size,
+                combined_score=round(combined_score, 2),
+                ci_low=round(ci_low, 2),
+                ci_high=round(ci_high, 2),
+                n_meals=food_meal_counts.get(food_name, 0),
+                n_symptom_episodes=n_symptom_episodes,
+                n_medicated_episodes=n_medicated,
+                medication_confounded=n_medicated > 0,
+                confidence_label=confidence_label,
+                sample_size=n_symptom_episodes,
             )
         )
 
-    result_foods.sort(key=lambda f: f.trigger_score, reverse=True)
+    result_foods.sort(key=lambda f: f.combined_score, reverse=True)
     return SuspectFoodsOut(foods=result_foods, total=len(result_foods))

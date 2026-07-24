@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -15,6 +15,9 @@ from app.models.enums import ComponentType, MealType, ProcessingStatus
 
 class Meal(Base):
     __tablename__ = "meals"
+    # Composite index accelerates the per-user, time-ranged scans used by the
+    # insights leaderboard, lag-correlation, and data-export queries.
+    __table_args__ = (Index("ix_meals_user_timestamp", "user_id", "timestamp"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -48,6 +51,8 @@ class Meal(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    # Soft delete — non-null marks the row as deleted; excluded from insights/export.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Relationships
     user: Mapped["User"] = relationship(back_populates="meals")  # type: ignore[name-defined]

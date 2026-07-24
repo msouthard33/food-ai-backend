@@ -44,6 +44,8 @@ class UserSensitivityProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+    # Soft delete — non-null marks the protocol/profile as deleted; excluded from export.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     user: Mapped["User"] = relationship(back_populates="sensitivity_profiles")  # type: ignore[name-defined]
 
