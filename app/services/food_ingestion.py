@@ -38,6 +38,34 @@ ALLERGEN_KEY_MAP: dict[str, ComponentType] = {
     "lectins": ComponentType.LECTINS,
 }
 
+# KB categorical severity -> 0-4 scale used by FoodComponentDetail.level (Numeric(3,1))
+# and the allergen_inference thresholds (>=2.5 high, >=1.5 moderate, >0 low).
+_LEVEL_TO_SCORE: dict[str, Decimal] = {
+    "none": Decimal("0"),
+    "very_low": Decimal("0.5"),
+    "low": Decimal("1"),
+    "low_moderate": Decimal("1.5"),
+    "moderate": Decimal("2"),
+    "high": Decimal("3"),
+    "very_high": Decimal("4"),
+}
+
+
+def _kb_level_to_numeric(raw: object) -> Decimal | None:
+    """Extract a 0-4 level from a KB allergen value.
+
+    v2.6.0 form: {"level": "high", "score": 95} -> map the categorical level.
+    Legacy form: a bare number -> used as-is. Unknown/None -> None (skipped).
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        return _LEVEL_TO_SCORE.get(str(raw.get("level", "")).lower().strip())
+    try:
+        return Decimal(str(raw))
+    except Exception:
+        return None
+
 
 def apply_preparation_modifiers(
     base_scores: dict[str, float],
@@ -81,9 +109,7 @@ def apply_preparation_modifiers(
         if any(term in prep_lower for term in modifier_terms):
             for component_str, delta in deltas.items():
                 if component_str in adjusted:
-                    adjusted[component_str] = max(
-                        0.0, min(100.0, adjusted[component_str] + delta)
-                    )
+                    adjusted[component_str] = max(0.0, min(100.0, adjusted[component_str] + delta))
 
     return adjusted
 
@@ -99,45 +125,69 @@ async def ingest_allergen_knowledge_base(db: AsyncSession, json_path: str | None
         Number of food entries processed.
     """
     if json_path is None:
-        json_path = str(Path(__file__).parent.parent.parent / "data" / "allergen_knowledge_base.json")
+        json_path = str(
+            Path(__file__).parent.parent.parent / "data" / "allergen_knowledge_base_complete.json"
+        )
 
     path = Path(json_path)
     if not path.exists():
-        logger.warning("Allergen knowledge base JSON not found at %s — skipping ingestion", json_path)
+        logger.warning(
+            "Allergen knowledge base JSON not found at %s — skipping ingestion", json_path
+        )
         return 0
 
     with path.open() as fh:
-        records: list[dict] = json.load(fh)
+        data = json.load(fh)
+
+    # Support the v2.6.0 KB ({"version", "foods": [...]}) and the legacy flat list.
+    records: list[dict] = data.get("foods", []) if isinstance(data, dict) else data
 
     count = 0
     for record in records:
-        food_name: str = record.get("food_name", "").strip()
+        if not isinstance(record, dict):
+            continue
+        food_name: str = (record.get("name") or record.get("food_name") or "").strip()
         if not food_name:
             continue
 
-        # Upsert the FoodEntry row
+        # v2.6.0 stores severities under "allergen_profile" as {"level","score"};
+        # legacy stored bare numbers under "allergens".
+        allergens: dict = record.get("allergen_profile") or record.get("allergens") or {}
+
+        # Upsert the FoodEntry row, populating every column the KB provides so
+        # search (common_names), the photo pipeline (allergen_profile,
+        # preparation_modifiers) and cross-reactivity all have data. The full
+        # 0-100 scores are preserved verbatim in the allergen_profile JSONB.
         result = await db.execute(select(FoodEntry).where(FoodEntry.name == food_name))
         entry = result.scalar_one_or_none()
         if entry is None:
-            entry = FoodEntry(
-                name=food_name,
-                category=record.get("category", ""),
-                date_added=date.today(),
-            )
+            entry = FoodEntry(name=food_name, date_added=date.today())
             db.add(entry)
-            await db.flush()  # get entry.id
+        entry.category = record.get("category") or entry.category
+        entry.subcategory = record.get("subcategory") or entry.subcategory
+        # Array columns: never store NULL — >half the KB omits common_names, and a
+        # NULL there breaks FoodSearchResult validation.
+        entry.common_names = record.get("common_names") or entry.common_names or []
+        entry.allergen_profile = allergens or entry.allergen_profile
+        entry.preparation_modifiers = (
+            record.get("preparation_modifiers") or entry.preparation_modifiers
+        )
+        entry.cross_reactivity_groups = (
+            record.get("cross_reactivity_groups") or entry.cross_reactivity_groups or []
+        )
+        await db.flush()  # ensure entry.id
 
-        # Upsert component detail rows
-        allergens: dict = record.get("allergens", {})
+        # Several KB keys map to one component (fodmap_* -> FODMAP); keep the most
+        # severe so a food high in any subtype reads as high for that component.
+        component_levels: dict[ComponentType, Decimal] = {}
         for json_key, component_type in ALLERGEN_KEY_MAP.items():
-            raw_value = allergens.get(json_key)
-            if raw_value is None:
+            level = _kb_level_to_numeric(allergens.get(json_key))
+            if level is None:
                 continue
-            try:
-                level = Decimal(str(raw_value))
-            except Exception:
-                continue
+            prev = component_levels.get(component_type)
+            component_levels[component_type] = level if prev is None else max(prev, level)
 
+        for component_type, level in component_levels.items():
             result2 = await db.execute(
                 select(FoodComponentDetail).where(
                     FoodComponentDetail.food_entry_id == entry.id,
@@ -146,12 +196,13 @@ async def ingest_allergen_knowledge_base(db: AsyncSession, json_path: str | None
             )
             detail = result2.scalar_one_or_none()
             if detail is None:
-                detail = FoodComponentDetail(
-                    food_entry_id=entry.id,
-                    component_type=component_type,
-                    level=level,
+                db.add(
+                    FoodComponentDetail(
+                        food_entry_id=entry.id,
+                        component_type=component_type,
+                        level=level,
+                    )
                 )
-                db.add(detail)
             else:
                 detail.level = level
 
