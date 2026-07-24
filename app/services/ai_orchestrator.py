@@ -9,7 +9,6 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
 
 from app.config import get_settings
 from app.services.food_ingestion import apply_preparation_modifiers
@@ -227,16 +226,22 @@ class AIOrchestrator:
         """
         from pathlib import Path
 
-        kb_path = Path(__file__).resolve().parent.parent.parent.parent / (
-            "04 - Food Science & Data"
-        ) / "allergen_knowledge_base_complete.json"
+        # Prefer the KB bundled with the backend (ships in prod under backend/data/);
+        # fall back to the external Food Science working copy used in local dev.
+        backend_root = Path(__file__).resolve().parent.parent.parent  # .../backend
+        kb_candidates = [
+            backend_root / "data" / "allergen_knowledge_base_complete.json",
+            backend_root.parent / "04 - Food Science & Data"
+            / "allergen_knowledge_base_complete.json",
+            Path("04 - Food Science & Data") / "allergen_knowledge_base_complete.json",
+            Path("data") / "allergen_knowledge_base_complete.json",
+        ]
+        kb_path = next((p for p in kb_candidates if p.exists()), None)
 
-        if not kb_path.exists():
-            # Fallback: try relative to CWD
-            kb_path = Path("04 - Food Science & Data") / "allergen_knowledge_base_complete.json"
-
-        if not kb_path.exists():
-            logger.warning("KB file not found at %s", kb_path)
+        if kb_path is None:
+            logger.warning(
+                "KB file not found; searched %s", [str(p) for p in kb_candidates]
+            )
             return None, None, None
 
         # Simple name-matching (not embedding-based for this sprint — embedding search
@@ -283,10 +288,14 @@ class AIOrchestrator:
                         best_score = score
 
         if best_match and best_score >= 0.3:
-            allergen_profile: dict[str, float] = {
-                k: float(v)
-                for k, v in (best_match.get("allergen_profile") or {}).items()
-            }
+            # KB allergen_profile values are either flat floats or nested
+            # {"level": ..., "score": N} dicts — normalise to a flat float score.
+            allergen_profile: dict[str, float] = {}
+            for k, v in (best_match.get("allergen_profile") or {}).items():
+                if isinstance(v, dict):
+                    allergen_profile[k] = float(v.get("score", 0.0))
+                else:
+                    allergen_profile[k] = float(v)
 
             # Apply preparation modifiers if a preparation method was detected.
             # e.g. "sourdough" reduces fodmap_fructans score by 40 points.
