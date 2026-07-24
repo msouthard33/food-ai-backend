@@ -39,6 +39,55 @@ ALLERGEN_KEY_MAP: dict[str, ComponentType] = {
 }
 
 
+def apply_preparation_modifiers(
+    base_scores: dict[str, float],
+    preparation_method: str | None,
+    kb_food: dict,
+) -> dict[str, float]:
+    """Adjust component scores based on preparation method and KB preparation_modifiers.
+
+    Sourdough fermentation reduces FODMAP fructan load; cooking reduces oxalate
+    content in spinach; etc. The KB encodes these deltas in a preparation_modifiers
+    dict on each food entry. This function applies matching deltas so that the
+    allergen profile logged for a meal reflects the actual preparation used, not
+    just the raw ingredient baseline.
+
+    Args:
+        base_scores: {allergen_key: score} from KB allergen_profile. Keys use the
+            raw KB naming convention (e.g. "fodmap_fructans", "histamine"). Scores
+            are on the 0-100 scale defined for estimated_level.
+        preparation_method: Free-text preparation description from MealItem or
+            extracted from a food name (e.g. "sourdough", "raw", "fermented").
+            None or empty string → base_scores returned unchanged.
+        kb_food: Full KB food entry dict. Must contain "preparation_modifiers" if
+            any modifiers should be applied. Structure:
+              {"preparation_modifiers": {"sourdough_fermented": {"fodmap_fructans": -40}}}
+
+    Returns:
+        New dict with modifier deltas applied. Scores are clamped to [0.0, 100.0].
+        The input base_scores dict is never mutated.
+    """
+    if not preparation_method or not kb_food.get("preparation_modifiers"):
+        return base_scores
+
+    prep_lower = preparation_method.lower().strip()
+    adjusted = dict(base_scores)
+
+    for modifier_key, deltas in kb_food["preparation_modifiers"].items():
+        # Match preparation method against modifier key terms.
+        # e.g. "sourdough_fermented" -> ["sourdough", "fermented"]
+        # A match fires if ANY of the modifier terms appears in the prep_lower string.
+        modifier_terms = modifier_key.replace("_", " ").lower().split()
+        if any(term in prep_lower for term in modifier_terms):
+            for component_str, delta in deltas.items():
+                if component_str in adjusted:
+                    adjusted[component_str] = max(
+                        0.0, min(100.0, adjusted[component_str] + delta)
+                    )
+
+    return adjusted
+
+
 async def ingest_allergen_knowledge_base(db: AsyncSession, json_path: str | None = None) -> int:
     """Load allergen knowledge base from JSON and upsert into the database.
 

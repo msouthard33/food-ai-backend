@@ -5,9 +5,9 @@ from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_log_symptom(client: AsyncClient):
-    resp = await client.post(
-        "/api/v1/symptoms/log",
+async def test_log_symptom(authed_client: AsyncClient):
+    resp = await authed_client.post(
+        "/api/v1/symptoms",
         json={
             "timestamp": "2026-04-04T12:30:00Z",
             "symptom_type": "nausea",
@@ -22,8 +22,8 @@ async def test_log_symptom(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_list_symptoms(client: AsyncClient):
-    resp = await client.get("/api/v1/symptoms")
+async def test_list_symptoms(authed_client: AsyncClient):
+    resp = await authed_client.get("/api/v1/symptoms")
     assert resp.status_code == 200
     data = resp.json()
     assert "items" in data

@@ -14,7 +14,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
 from app.middleware.audit_log import AuditLogMiddleware
-from app.routers import admin, foods, health, insights, meals, reports, symptoms
+from app.routers import admin, barcode, fhir, foods, health, insights, meals, medications, protocols, reports, symptoms, users
 
 settings = get_settings()
 
@@ -60,8 +60,16 @@ tags_metadata = [
         "description": "Clinician-ready PDF report generation for patient/doctor review sessions.",
     },
     {
+        "name": "barcode",
+        "description": "Barcode product lookup via Open Food Facts with KB matching.",
+    },
+    {
         "name": "admin",
         "description": "Internal admin operations (food ingestion, maintenance). Requires admin API key.",
+    },
+    {
+        "name": "users",
+        "description": "User profile actions and onboarding hooks (condition prior seeding).",
     },
 ]
 
@@ -141,10 +149,15 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(meals.router)
 app.include_router(symptoms.router)
+app.include_router(medications.router)
 app.include_router(foods.router)
 app.include_router(insights.router)
+app.include_router(protocols.router)
+app.include_router(fhir.router)
 app.include_router(reports.router)
+app.include_router(barcode.router)
 app.include_router(admin.router)
+app.include_router(users.router)
 
 
 @app.on_event("startup")

@@ -155,6 +155,48 @@ class TestComponentTypeEnum:
 
 
 # ---------------------------------------------------------------------------
+# ORM model tests (no DB required — validates class attributes)
+# ---------------------------------------------------------------------------
+
+
+class TestSensitivityOrmModels:
+    """Verify ORM models exist, are importable, and have expected attributes."""
+
+    def test_user_sensitivity_profile_importable(self):
+        from app.models.sensitivity import UserSensitivityProfile
+        assert UserSensitivityProfile.__tablename__ == "user_sensitivity_profiles"
+
+    def test_food_combined_rating_importable(self):
+        from app.models.sensitivity import FoodCombinedRating
+        assert FoodCombinedRating.__tablename__ == "food_combined_ratings"
+
+    def test_user_sensitivity_profile_columns(self):
+        from app.models.sensitivity import UserSensitivityProfile
+        cols = {c.key for c in UserSensitivityProfile.__table__.columns}
+        expected = {"id", "user_id", "component_type", "weight", "threshold", "active", "notes", "created_at", "updated_at"}
+        assert expected.issubset(cols), f"Missing columns: {expected - cols}"
+
+    def test_food_combined_rating_columns(self):
+        from app.models.sensitivity import FoodCombinedRating
+        cols = {c.key for c in FoodCombinedRating.__table__.columns}
+        expected = {"id", "user_id", "food_id", "combined_score", "rating_label", "contributing_components", "computed_at", "expires_at"}
+        assert expected.issubset(cols), f"Missing columns: {expected - cols}"
+
+    def test_models_registered_in_init(self):
+        from app.models import FoodCombinedRating, UserSensitivityProfile
+        assert UserSensitivityProfile is not None
+        assert FoodCombinedRating is not None
+
+    def test_user_has_sensitivity_profiles_relationship(self):
+        from app.models.user import User
+        assert hasattr(User, "sensitivity_profiles")
+
+    def test_user_has_combined_ratings_relationship(self):
+        from app.models.user import User
+        assert hasattr(User, "combined_ratings")
+
+
+# ---------------------------------------------------------------------------
 # HTTP smoke tests (requires conftest client fixture → local DB)
 # ---------------------------------------------------------------------------
 

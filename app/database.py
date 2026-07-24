@@ -11,15 +11,17 @@ from app.config import get_settings
 settings = get_settings()
 
 # Use NullPool when connecting through Supabase's PgBouncer pooler (port 6543)
-# to avoid double-pooling. Use standard pooling for direct connections.
+# to avoid double-pooling. Also use NullPool in testing to avoid event-loop
+# conflicts across tests (each async test may get a new event loop).
 _is_pooler = ":6543/" in settings.database_url
+_use_null_pool = _is_pooler or settings.is_testing
 
 engine = create_async_engine(
     settings.database_url,
     echo=(not settings.is_production),
     **({
         "poolclass": NullPool,
-    } if _is_pooler else {
+    } if _use_null_pool else {
         "pool_size": 5,
         "max_overflow": 10,
         "pool_pre_ping": True,

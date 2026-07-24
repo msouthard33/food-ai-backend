@@ -30,6 +30,7 @@ class User(Base):
     display_name: Mapped[str | None] = mapped_column(String(255))
     timezone: Mapped[str] = mapped_column(String(63), default="UTC")
     onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_synthetic: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -41,6 +42,8 @@ class User(Base):
     settings: Mapped["UserSettings | None"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
     meals: Mapped[list["Meal"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # type: ignore[name-defined]
     symptom_scores: Mapped[list["SymptomScore"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # type: ignore[name-defined]
+    sensitivity_profiles: Mapped[list["UserSensitivityProfile"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # type: ignore[name-defined]
+    combined_ratings: Mapped[list["FoodCombinedRating"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # type: ignore[name-defined]
 
 
 class UserCondition(Base):
