@@ -4,9 +4,10 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, computed_field
 
-from app.models.enums import MealType, ProcessingStatus
+from app.models.enums import ComponentType, MealType, ProcessingStatus
+from app.utils.confidence import confidence_to_tier_label
 
 
 class MealCreate(BaseModel):
@@ -29,6 +30,20 @@ class MealItemBatchCreate(BaseModel):
     items: list[MealItemCreate]
 
 
+class MealItemComponentOut(BaseModel):
+    """Component-level allergen/sensitivity detail with D9 tier label."""
+    component_type: ComponentType
+    estimated_level: Decimal | None = None
+    confidence_score: Decimal
+
+    model_config = ConfigDict(from_attributes=True, use_enum_values=True)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def tier_label(self) -> str:
+        return confidence_to_tier_label(float(self.confidence_score))
+
+
 class MealItemOut(BaseModel):
     id: uuid.UUID
     meal_id: uuid.UUID
@@ -37,6 +52,7 @@ class MealItemOut(BaseModel):
     unit: str | None = None
     preparation_method: str | None = None
     confidence_score: Decimal
+    components: list[MealItemComponentOut] = []
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
