@@ -4,11 +4,9 @@ Supports OpenAI for embeddings and vision (gpt-4o-mini).
 Never logs image bytes. Never stores photos to disk.
 """
 
-import base64
 import json
 import logging
 import time
-from typing import Any
 
 import openai
 
@@ -38,6 +36,7 @@ def confidence_to_tier(confidence: float) -> str:
 # ---------------------------------------------------------------------------
 # Provider class
 # ---------------------------------------------------------------------------
+
 
 class LLMProvider:
     """Unified LLM provider for vision, embeddings, and text."""
@@ -77,16 +76,16 @@ class LLMProvider:
             "You are a food identification assistant for a dietary tracking app. "
             "Analyze this meal photo and identify every distinct food item visible.\n\n"
             "Return ONLY valid JSON — no markdown fences, no explanation.\n"
-            "Format: [{\"food\": \"<food name>\", \"portion\": \"<estimated portion>\", "
-            "\"confidence\": <0.0-1.0>}]\n\n"
+            'Format: [{"food": "<food name>", "portion": "<estimated portion>", '
+            '"confidence": <0.0-1.0>}]\n\n'
             "Rules:\n"
             "- Be specific: 'grilled chicken breast' not just 'chicken'\n"
             "- Estimate portions in common units (cup, oz, piece, slice, tablespoon)\n"
             "- Confidence: 0.9+ for clearly visible items, 0.5-0.8 for partially visible, "
             "<0.5 for guesses\n"
             "- Include sauces, dressings, and condiments as separate items\n"
-            "- If the image is not food, return [{\"food\": \"Not a food image\", "
-            "\"portion\": \"N/A\", \"confidence\": 0.0}]"
+            '- If the image is not food, return [{"food": "Not a food image", '
+            '"portion": "N/A", "confidence": 0.0}]'
         )
 
         t0 = time.time()
@@ -128,11 +127,16 @@ class LLMProvider:
                 input_cost = (response.usage.prompt_tokens / 1000) * 0.00015
                 output_cost = (response.usage.completion_tokens / 1000) * 0.0006
                 total_cost = input_cost + output_cost
-                logger.info("Vision cost estimate: $%.6f (input=$%.6f, output=$%.6f)",
-                            total_cost, input_cost, output_cost)
+                logger.info(
+                    "Vision cost estimate: $%.6f (input=$%.6f, output=$%.6f)",
+                    total_cost,
+                    input_cost,
+                    output_cost,
+                )
                 if total_cost > 0.01:
-                    logger.warning("COST GATE: photo analysis cost $%.4f exceeds $0.01 threshold",
-                                   total_cost)
+                    logger.warning(
+                        "COST GATE: photo analysis cost $%.4f exceeds $0.01 threshold", total_cost
+                    )
 
             # Parse JSON from response
             foods = self._parse_vision_response(raw_text)
@@ -156,7 +160,7 @@ class LLMProvider:
         text = raw_text.strip()
         if text.startswith("```"):
             lines = text.split("\n")
-            lines = [l for l in lines if not l.strip().startswith("```")]
+            lines = [ln for ln in lines if not ln.strip().startswith("```")]
             text = "\n".join(lines).strip()
 
         try:
@@ -165,11 +169,13 @@ class LLMProvider:
                 # Validate structure
                 result = []
                 for item in parsed:
-                    result.append({
-                        "food": str(item.get("food", "Unknown")),
-                        "portion": str(item.get("portion", "Unknown")),
-                        "confidence": float(item.get("confidence", 0.5)),
-                    })
+                    result.append(
+                        {
+                            "food": str(item.get("food", "Unknown")),
+                            "portion": str(item.get("portion", "Unknown")),
+                            "confidence": float(item.get("confidence", 0.5)),
+                        }
+                    )
                 return result
             elif isinstance(parsed, dict) and "foods" in parsed:
                 return self._parse_vision_response(json.dumps(parsed["foods"]))
@@ -177,7 +183,13 @@ class LLMProvider:
             logger.warning("Failed to parse vision response as JSON: %s", text[:200])
 
         # Fallback: try to extract food names from text
-        return [{"food": "Parse error — raw response available", "portion": "N/A", "confidence": 0.0}]
+        return [
+            {
+                "food": "Parse error — raw response available",
+                "portion": "N/A",
+                "confidence": 0.0,
+            }
+        ]
 
     @staticmethod
     def _vision_fallback(error_code: str) -> dict:
@@ -217,9 +229,7 @@ class LLMProvider:
         all_embs: list[list[float]] = []
         for i in range(0, len(texts), batch_size):
             chunk = texts[i : i + batch_size]
-            resp = await self._client.embeddings.create(
-                model=self.EMBEDDING_MODEL, input=chunk
-            )
+            resp = await self._client.embeddings.create(model=self.EMBEDDING_MODEL, input=chunk)
             all_embs.extend([item.embedding for item in resp.data])
             if i + batch_size < len(texts):
                 await asyncio.sleep(0.3)
