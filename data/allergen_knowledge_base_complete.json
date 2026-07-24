@@ -1,7 +1,7 @@
 {
   "version": "2.6.0",
-  "last_updated": "2026-04-12",
-  "total_items": 970,
+  "last_updated": "2026-07-24",
+  "total_items": 956,
   "foods": [
     {
       "id": "grain_001",
@@ -5348,105 +5348,6 @@
       "notes": "High salicylates. Histamine liberator effects."
     },
     {
-      "id": "fruit_005",
-      "name": "Avocado",
-      "category": "Fruits",
-      "subcategory": "Tropical",
-      "common_names": [
-        "avocado",
-        "alligator pear"
-      ],
-      "allergen_profile": {
-        "gluten": {
-          "level": "none",
-          "score": 0
-        },
-        "dairy": {
-          "level": "none",
-          "score": 0
-        },
-        "soy": {
-          "level": "none",
-          "score": 0
-        },
-        "egg": {
-          "level": "none",
-          "score": 0
-        },
-        "tree_nuts": {
-          "level": "low",
-          "score": 15
-        },
-        "peanuts": {
-          "level": "none",
-          "score": 0
-        },
-        "fish": {
-          "level": "none",
-          "score": 0
-        },
-        "shellfish": {
-          "level": "none",
-          "score": 0
-        },
-        "nickel": {
-          "level": "none",
-          "score": 0
-        },
-        "histamine": {
-          "level": "high",
-          "score": 75
-        },
-        "fodmap_fructans": {
-          "level": "moderate",
-          "score": 55
-        },
-        "fodmap_gos": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_lactose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_fructose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_polyols": {
-          "level": "none",
-          "score": 0
-        },
-        "salicylates": {
-          "level": "none",
-          "score": 0
-        },
-        "oxalates": {
-          "level": "none",
-          "score": 0
-        },
-        "lectins": {
-          "level": "none",
-          "score": 0
-        },
-        "sulfites": {
-          "level": "none",
-          "score": 0
-        },
-        "amines": {
-          "level": "high",
-          "score": 70
-        }
-      },
-      "preparation_modifiers": {
-        "overripe": {
-          "histamine": 15,
-          "amines": 20
-        }
-      },
-      "notes": "Very high histamine and amines. Latex-fruit syndrome risk."
-    },
-    {
       "id": "fruit_006",
       "name": "Tomato",
       "category": "Fruits",
@@ -7986,99 +7887,6 @@
       "notes": "Very low allergen profile. Excellent for restricted diets."
     },
     {
-      "id": "veg_016",
-      "name": "Eggplant",
-      "category": "Vegetables",
-      "subcategory": "Nightshade",
-      "common_names": [
-        "eggplant",
-        "aubergine"
-      ],
-      "allergen_profile": {
-        "gluten": {
-          "level": "none",
-          "score": 0
-        },
-        "dairy": {
-          "level": "none",
-          "score": 0
-        },
-        "soy": {
-          "level": "none",
-          "score": 0
-        },
-        "egg": {
-          "level": "none",
-          "score": 0
-        },
-        "tree_nuts": {
-          "level": "none",
-          "score": 0
-        },
-        "peanuts": {
-          "level": "none",
-          "score": 0
-        },
-        "fish": {
-          "level": "none",
-          "score": 0
-        },
-        "shellfish": {
-          "level": "none",
-          "score": 0
-        },
-        "nickel": {
-          "level": "none",
-          "score": 0
-        },
-        "histamine": {
-          "level": "moderate",
-          "score": 55
-        },
-        "fodmap_fructans": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_gos": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_lactose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_fructose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_polyols": {
-          "level": "none",
-          "score": 0
-        },
-        "salicylates": {
-          "level": "moderate",
-          "score": 50
-        },
-        "oxalates": {
-          "level": "none",
-          "score": 0
-        },
-        "lectins": {
-          "level": "moderate",
-          "score": 45
-        },
-        "sulfites": {
-          "level": "none",
-          "score": 0
-        },
-        "amines": {
-          "level": "none",
-          "score": 0
-        }
-      },
-      "notes": "Nightshade. Moderate histamine and salicylates. Lectins in seeds."
-    },
-    {
       "id": "veg_017",
       "name": "Cabbage",
       "category": "Vegetables",
@@ -9476,101 +9284,6 @@
       "notes": "HIGH oxalates and nickel. Blanching reduces oxalates."
     },
     {
-      "id": "nuts_003",
-      "name": "Walnuts",
-      "category": "Nuts/Seeds",
-      "subcategory": "Tree Nuts",
-      "common_names": [
-        "walnuts",
-        "English walnuts",
-        "black walnuts"
-      ],
-      "allergen_profile": {
-        "gluten": {
-          "level": "none",
-          "score": 0
-        },
-        "dairy": {
-          "level": "none",
-          "score": 0
-        },
-        "soy": {
-          "level": "none",
-          "score": 0
-        },
-        "egg": {
-          "level": "none",
-          "score": 0
-        },
-        "tree_nuts": {
-          "level": "very_high",
-          "score": 100
-        },
-        "peanuts": {
-          "level": "none",
-          "score": 0
-        },
-        "fish": {
-          "level": "none",
-          "score": 0
-        },
-        "shellfish": {
-          "level": "none",
-          "score": 0
-        },
-        "nickel": {
-          "level": "high",
-          "score": 72
-        },
-        "histamine": {
-          "level": "low",
-          "score": 15
-        },
-        "fodmap_fructans": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_gos": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_lactose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_fructose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_polyols": {
-          "level": "none",
-          "score": 0
-        },
-        "salicylates": {
-          "level": "high",
-          "score": 70
-        },
-        "oxalates": {
-          "level": "high",
-          "score": 80
-        },
-        "lectins": {
-          "level": "none",
-          "score": 0
-        },
-        "sulfites": {
-          "level": "none",
-          "score": 0
-        },
-        "amines": {
-          "level": "low",
-          "score": 15
-        }
-      },
-      "preparation_modifiers": {},
-      "notes": "High oxalates and salicylates. Significant nickel content."
-    },
-    {
       "id": "nuts_004",
       "name": "Sunflower Seeds",
       "category": "Nuts/Seeds",
@@ -10518,102 +10231,6 @@
       },
       "preparation_modifiers": {},
       "notes": "VERY HIGH histamine. Fermented fish product with extreme amine levels."
-    },
-    {
-      "id": "condiment_004",
-      "name": "Ketchup",
-      "category": "Condiments",
-      "subcategory": "Tomato-based",
-      "common_names": [
-        "catsup",
-        "ketchup",
-        "tomato ketchup"
-      ],
-      "allergen_profile": {
-        "gluten": {
-          "level": "none",
-          "score": 0
-        },
-        "dairy": {
-          "level": "none",
-          "score": 0
-        },
-        "soy": {
-          "level": "none",
-          "score": 0
-        },
-        "egg": {
-          "level": "none",
-          "score": 0
-        },
-        "tree_nuts": {
-          "level": "none",
-          "score": 0
-        },
-        "peanuts": {
-          "level": "none",
-          "score": 0
-        },
-        "fish": {
-          "level": "none",
-          "score": 0
-        },
-        "shellfish": {
-          "level": "none",
-          "score": 0
-        },
-        "nickel": {
-          "level": "low",
-          "score": 20
-        },
-        "histamine": {
-          "level": "moderate",
-          "score": 52
-        },
-        "fodmap_fructans": {
-          "level": "very_low",
-          "score": 2
-        },
-        "fodmap_gos": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_lactose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_fructose": {
-          "level": "moderate",
-          "score": 55
-        },
-        "fodmap_polyols": {
-          "level": "none",
-          "score": 0
-        },
-        "salicylates": {
-          "level": "moderate",
-          "score": 55
-        },
-        "oxalates": {
-          "level": "moderate",
-          "score": 48
-        },
-        "lectins": {
-          "level": "none",
-          "score": 0
-        },
-        "sulfites": {
-          "level": "low",
-          "score": 22
-        },
-        "amines": {
-          "level": "low",
-          "score": 18
-        }
-      },
-      "preparation_modifiers": {},
-      "notes": "Moderate histamine and salicylates. Contains added sugars and fructose.",
-      "cross_reactivity_groups": []
     },
     {
       "id": "condiment_005",
@@ -14584,7 +14201,7 @@
     },
     {
       "id": "asian_007",
-      "name": "Edamame",
+      "name": "Edamame (steamed, salted)",
       "category": "Ethnic Cuisine",
       "subcategory": "Asian - Japanese",
       "common_names": [
@@ -14996,7 +14613,7 @@
     },
     {
       "id": "asian_011",
-      "name": "Kimchi",
+      "name": "Kimchi (with shrimp paste)",
       "category": "Ethnic Cuisine",
       "subcategory": "Asian - Korean",
       "common_names": [
@@ -32630,98 +32247,6 @@
       "notes": "Soy-free soy sauce alternative"
     },
     {
-      "id": "health_013",
-      "name": "Miso Paste",
-      "category": "Specialty & Health Foods",
-      "subcategory": "Health Food",
-      "common_names": [],
-      "allergen_profile": {
-        "gluten": {
-          "level": "none",
-          "score": 0
-        },
-        "dairy": {
-          "level": "none",
-          "score": 0
-        },
-        "soy": {
-          "level": "high",
-          "score": 85
-        },
-        "egg": {
-          "level": "none",
-          "score": 0
-        },
-        "tree_nuts": {
-          "level": "none",
-          "score": 0
-        },
-        "peanuts": {
-          "level": "none",
-          "score": 0
-        },
-        "fish": {
-          "level": "none",
-          "score": 0
-        },
-        "shellfish": {
-          "level": "none",
-          "score": 0
-        },
-        "nickel": {
-          "level": "very_low",
-          "score": 8
-        },
-        "histamine": {
-          "level": "low",
-          "score": 25
-        },
-        "fodmap_fructans": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_gos": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_lactose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_fructose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_polyols": {
-          "level": "none",
-          "score": 0
-        },
-        "salicylates": {
-          "level": "none",
-          "score": 0
-        },
-        "oxalates": {
-          "level": "none",
-          "score": 0
-        },
-        "lectins": {
-          "level": "none",
-          "score": 0
-        },
-        "sulfites": {
-          "level": "very_low",
-          "score": 2
-        },
-        "amines": {
-          "level": "low",
-          "score": 15
-        }
-      },
-      "preparation_modifiers": {},
-      "cross_reactivity_groups": [],
-      "notes": "Fermented soy; histamine and amines"
-    },
-    {
       "id": "health_014",
       "name": "Tempeh",
       "category": "Specialty & Health Foods",
@@ -32812,98 +32337,6 @@
       "preparation_modifiers": {},
       "cross_reactivity_groups": [],
       "notes": "Fermented soy; lectins"
-    },
-    {
-      "id": "health_015",
-      "name": "Seitan",
-      "category": "Specialty & Health Foods",
-      "subcategory": "Health Food",
-      "common_names": [],
-      "allergen_profile": {
-        "gluten": {
-          "level": "very_high",
-          "score": 95
-        },
-        "dairy": {
-          "level": "none",
-          "score": 0
-        },
-        "soy": {
-          "level": "none",
-          "score": 0
-        },
-        "egg": {
-          "level": "none",
-          "score": 0
-        },
-        "tree_nuts": {
-          "level": "none",
-          "score": 0
-        },
-        "peanuts": {
-          "level": "none",
-          "score": 0
-        },
-        "fish": {
-          "level": "none",
-          "score": 0
-        },
-        "shellfish": {
-          "level": "none",
-          "score": 0
-        },
-        "nickel": {
-          "level": "very_low",
-          "score": 8
-        },
-        "histamine": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_fructans": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_gos": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_lactose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_fructose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_polyols": {
-          "level": "none",
-          "score": 0
-        },
-        "salicylates": {
-          "level": "none",
-          "score": 0
-        },
-        "oxalates": {
-          "level": "none",
-          "score": 0
-        },
-        "lectins": {
-          "level": "none",
-          "score": 0
-        },
-        "sulfites": {
-          "level": "none",
-          "score": 0
-        },
-        "amines": {
-          "level": "none",
-          "score": 0
-        }
-      },
-      "preparation_modifiers": {},
-      "cross_reactivity_groups": [],
-      "notes": "Pure gluten; very high allergen"
     },
     {
       "id": "dairy2_001",
@@ -44207,98 +43640,6 @@
       "notes": "SIGHI class 3. Penicillium roqueforti mold-ripened; very high histamine and tyramine."
     },
     {
-      "id": "hist_004",
-      "name": "Gorgonzola",
-      "category": "Dairy & Alternatives",
-      "subcategory": "Blue cheese",
-      "common_names": [],
-      "allergen_profile": {
-        "gluten": {
-          "level": "none",
-          "score": 0
-        },
-        "dairy": {
-          "level": "very_high",
-          "score": 95
-        },
-        "soy": {
-          "level": "none",
-          "score": 0
-        },
-        "egg": {
-          "level": "none",
-          "score": 0
-        },
-        "tree_nuts": {
-          "level": "none",
-          "score": 0
-        },
-        "peanuts": {
-          "level": "none",
-          "score": 0
-        },
-        "fish": {
-          "level": "none",
-          "score": 0
-        },
-        "shellfish": {
-          "level": "none",
-          "score": 0
-        },
-        "nickel": {
-          "level": "none",
-          "score": 10
-        },
-        "histamine": {
-          "level": "high",
-          "score": 90
-        },
-        "fodmap_fructans": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_gos": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_lactose": {
-          "level": "none",
-          "score": 10
-        },
-        "fodmap_fructose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_polyols": {
-          "level": "none",
-          "score": 0
-        },
-        "salicylates": {
-          "level": "none",
-          "score": 5
-        },
-        "oxalates": {
-          "level": "none",
-          "score": 5
-        },
-        "lectins": {
-          "level": "none",
-          "score": 0
-        },
-        "sulfites": {
-          "level": "none",
-          "score": 0
-        },
-        "amines": {
-          "level": "high",
-          "score": 90
-        }
-      },
-      "preparation_modifiers": {},
-      "cross_reactivity_groups": [],
-      "notes": "SIGHI class 3. Blue mold-ripened."
-    },
-    {
       "id": "hist_005",
       "name": "Emmental",
       "category": "Dairy & Alternatives",
@@ -44485,98 +43826,6 @@
       "notes": "SIGHI class 3 when aged >6mo."
     },
     {
-      "id": "hist_007",
-      "name": "Sauerkraut",
-      "category": "Vegetables",
-      "subcategory": "Fermented vegetable",
-      "common_names": [],
-      "allergen_profile": {
-        "gluten": {
-          "level": "none",
-          "score": 0
-        },
-        "dairy": {
-          "level": "none",
-          "score": 0
-        },
-        "soy": {
-          "level": "none",
-          "score": 0
-        },
-        "egg": {
-          "level": "none",
-          "score": 0
-        },
-        "tree_nuts": {
-          "level": "none",
-          "score": 0
-        },
-        "peanuts": {
-          "level": "none",
-          "score": 0
-        },
-        "fish": {
-          "level": "none",
-          "score": 0
-        },
-        "shellfish": {
-          "level": "none",
-          "score": 0
-        },
-        "nickel": {
-          "level": "very_low",
-          "score": 20
-        },
-        "histamine": {
-          "level": "high",
-          "score": 90
-        },
-        "fodmap_fructans": {
-          "level": "moderate",
-          "score": 60
-        },
-        "fodmap_gos": {
-          "level": "none",
-          "score": 10
-        },
-        "fodmap_lactose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_fructose": {
-          "level": "none",
-          "score": 10
-        },
-        "fodmap_polyols": {
-          "level": "none",
-          "score": 10
-        },
-        "salicylates": {
-          "level": "low",
-          "score": 30
-        },
-        "oxalates": {
-          "level": "none",
-          "score": 10
-        },
-        "lectins": {
-          "level": "very_low",
-          "score": 15
-        },
-        "sulfites": {
-          "level": "low",
-          "score": 40
-        },
-        "amines": {
-          "level": "high",
-          "score": 85
-        }
-      },
-      "preparation_modifiers": {},
-      "cross_reactivity_groups": [],
-      "notes": "SIGHI class 3. Lactic fermentation produces high histamine."
-    },
-    {
       "id": "hist_010",
       "name": "Natto",
       "category": "Legumes",
@@ -44759,98 +44008,6 @@
       "preparation_modifiers": {},
       "cross_reactivity_groups": [],
       "notes": "Wheat-free soy sauce; still high histamine."
-    },
-    {
-      "id": "hist_015",
-      "name": "Sardines Canned",
-      "category": "Fish & Seafood",
-      "subcategory": "Canned fish",
-      "common_names": [],
-      "allergen_profile": {
-        "gluten": {
-          "level": "none",
-          "score": 0
-        },
-        "dairy": {
-          "level": "none",
-          "score": 0
-        },
-        "soy": {
-          "level": "none",
-          "score": 0
-        },
-        "egg": {
-          "level": "none",
-          "score": 0
-        },
-        "tree_nuts": {
-          "level": "none",
-          "score": 0
-        },
-        "peanuts": {
-          "level": "none",
-          "score": 0
-        },
-        "fish": {
-          "level": "very_high",
-          "score": 100
-        },
-        "shellfish": {
-          "level": "none",
-          "score": 10
-        },
-        "nickel": {
-          "level": "very_low",
-          "score": 20
-        },
-        "histamine": {
-          "level": "moderate",
-          "score": 75
-        },
-        "fodmap_fructans": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_gos": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_lactose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_fructose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_polyols": {
-          "level": "none",
-          "score": 0
-        },
-        "salicylates": {
-          "level": "none",
-          "score": 5
-        },
-        "oxalates": {
-          "level": "moderate",
-          "score": 60
-        },
-        "lectins": {
-          "level": "none",
-          "score": 0
-        },
-        "sulfites": {
-          "level": "none",
-          "score": 10
-        },
-        "amines": {
-          "level": "moderate",
-          "score": 75
-        }
-      },
-      "preparation_modifiers": {},
-      "cross_reactivity_groups": [],
-      "notes": "SIGHI class 2-3 depending on processing. Scombroid family."
     },
     {
       "id": "hist_016",
@@ -45311,98 +44468,6 @@
       "preparation_modifiers": {},
       "cross_reactivity_groups": [],
       "notes": "Fermented cured pork/beef; MCAS trigger."
-    },
-    {
-      "id": "hist_021",
-      "name": "Kombucha",
-      "category": "Beverages",
-      "subcategory": "Fermented beverage",
-      "common_names": [],
-      "allergen_profile": {
-        "gluten": {
-          "level": "none",
-          "score": 0
-        },
-        "dairy": {
-          "level": "none",
-          "score": 0
-        },
-        "soy": {
-          "level": "none",
-          "score": 0
-        },
-        "egg": {
-          "level": "none",
-          "score": 0
-        },
-        "tree_nuts": {
-          "level": "none",
-          "score": 0
-        },
-        "peanuts": {
-          "level": "none",
-          "score": 0
-        },
-        "fish": {
-          "level": "none",
-          "score": 0
-        },
-        "shellfish": {
-          "level": "none",
-          "score": 0
-        },
-        "nickel": {
-          "level": "none",
-          "score": 10
-        },
-        "histamine": {
-          "level": "high",
-          "score": 80
-        },
-        "fodmap_fructans": {
-          "level": "none",
-          "score": 5
-        },
-        "fodmap_gos": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_lactose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_fructose": {
-          "level": "very_low",
-          "score": 20
-        },
-        "fodmap_polyols": {
-          "level": "none",
-          "score": 5
-        },
-        "salicylates": {
-          "level": "very_low",
-          "score": 25
-        },
-        "oxalates": {
-          "level": "very_low",
-          "score": 15
-        },
-        "lectins": {
-          "level": "none",
-          "score": 0
-        },
-        "sulfites": {
-          "level": "very_low",
-          "score": 20
-        },
-        "amines": {
-          "level": "moderate",
-          "score": 70
-        }
-      },
-      "preparation_modifiers": {},
-      "cross_reactivity_groups": [],
-      "notes": "Fermented tea; contains histamine and trace alcohol."
     },
     {
       "id": "hist_022",
@@ -45889,190 +44954,6 @@
       "preparation_modifiers": {},
       "cross_reactivity_groups": [],
       "notes": "SIGHI class 2-3."
-    },
-    {
-      "id": "hist_028",
-      "name": "Spinach Cooked",
-      "category": "Vegetables",
-      "subcategory": "Leafy green",
-      "common_names": [],
-      "allergen_profile": {
-        "gluten": {
-          "level": "none",
-          "score": 0
-        },
-        "dairy": {
-          "level": "none",
-          "score": 0
-        },
-        "soy": {
-          "level": "none",
-          "score": 0
-        },
-        "egg": {
-          "level": "none",
-          "score": 0
-        },
-        "tree_nuts": {
-          "level": "none",
-          "score": 0
-        },
-        "peanuts": {
-          "level": "none",
-          "score": 0
-        },
-        "fish": {
-          "level": "none",
-          "score": 0
-        },
-        "shellfish": {
-          "level": "none",
-          "score": 0
-        },
-        "nickel": {
-          "level": "low",
-          "score": 40
-        },
-        "histamine": {
-          "level": "moderate",
-          "score": 70
-        },
-        "fodmap_fructans": {
-          "level": "none",
-          "score": 5
-        },
-        "fodmap_gos": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_lactose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_fructose": {
-          "level": "none",
-          "score": 5
-        },
-        "fodmap_polyols": {
-          "level": "none",
-          "score": 0
-        },
-        "salicylates": {
-          "level": "low",
-          "score": 35
-        },
-        "oxalates": {
-          "level": "very_high",
-          "score": 95
-        },
-        "lectins": {
-          "level": "very_low",
-          "score": 15
-        },
-        "sulfites": {
-          "level": "none",
-          "score": 0
-        },
-        "amines": {
-          "level": "low",
-          "score": 40
-        }
-      },
-      "preparation_modifiers": {},
-      "cross_reactivity_groups": [],
-      "notes": "Histamine liberator; high oxalates."
-    },
-    {
-      "id": "hist_030",
-      "name": "Tomato Paste",
-      "category": "Vegetables",
-      "subcategory": "Concentrated tomato",
-      "common_names": [],
-      "allergen_profile": {
-        "gluten": {
-          "level": "none",
-          "score": 0
-        },
-        "dairy": {
-          "level": "none",
-          "score": 0
-        },
-        "soy": {
-          "level": "none",
-          "score": 0
-        },
-        "egg": {
-          "level": "none",
-          "score": 0
-        },
-        "tree_nuts": {
-          "level": "none",
-          "score": 0
-        },
-        "peanuts": {
-          "level": "none",
-          "score": 0
-        },
-        "fish": {
-          "level": "none",
-          "score": 0
-        },
-        "shellfish": {
-          "level": "none",
-          "score": 0
-        },
-        "nickel": {
-          "level": "low",
-          "score": 30
-        },
-        "histamine": {
-          "level": "high",
-          "score": 85
-        },
-        "fodmap_fructans": {
-          "level": "none",
-          "score": 10
-        },
-        "fodmap_gos": {
-          "level": "none",
-          "score": 5
-        },
-        "fodmap_lactose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_fructose": {
-          "level": "low",
-          "score": 35
-        },
-        "fodmap_polyols": {
-          "level": "none",
-          "score": 5
-        },
-        "salicylates": {
-          "level": "high",
-          "score": 85
-        },
-        "oxalates": {
-          "level": "very_low",
-          "score": 15
-        },
-        "lectins": {
-          "level": "very_low",
-          "score": 25
-        },
-        "sulfites": {
-          "level": "very_low",
-          "score": 15
-        },
-        "amines": {
-          "level": "high",
-          "score": 80
-        }
-      },
-      "preparation_modifiers": {},
-      "cross_reactivity_groups": [],
-      "notes": "Concentrated histamine + salicylate + amines."
     },
     {
       "id": "drug_002",
@@ -55809,7 +54690,7 @@
     },
     {
       "id": "hist_111",
-      "name": "Kimchi",
+      "name": "Kimchi (vegetable-only)",
       "category": "Vegetables",
       "subcategory": "Fermented",
       "common_names": [],
@@ -56179,112 +55060,6 @@
       "cross_reactivity_groups": [],
       "notes": "SCOBY fermentation \u2014 histamine, amines, and trace alcohol.",
       "sighi_rating": "3/3"
-    },
-    {
-      "id": "hist_115",
-      "name": "Red Wine",
-      "category": "Beverages",
-      "subcategory": "Alcohol",
-      "common_names": [],
-      "allergen_profile": {
-        "gluten": {
-          "level": "none",
-          "score": 0
-        },
-        "dairy": {
-          "level": "none",
-          "score": 0
-        },
-        "soy": {
-          "level": "none",
-          "score": 0
-        },
-        "egg": {
-          "level": "none",
-          "score": 0
-        },
-        "tree_nuts": {
-          "level": "none",
-          "score": 0
-        },
-        "peanuts": {
-          "level": "none",
-          "score": 0
-        },
-        "fish": {
-          "level": "none",
-          "score": 0
-        },
-        "shellfish": {
-          "level": "none",
-          "score": 0
-        },
-        "nickel": {
-          "level": "none",
-          "score": 0
-        },
-        "histamine": {
-          "level": "high",
-          "score": 90
-        },
-        "fodmap_fructans": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_gos": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_lactose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_fructose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_polyols": {
-          "level": "none",
-          "score": 0
-        },
-        "salicylates": {
-          "level": "moderate",
-          "score": 70
-        },
-        "oxalates": {
-          "level": "none",
-          "score": 0
-        },
-        "lectins": {
-          "level": "none",
-          "score": 0
-        },
-        "sulfites": {
-          "level": "moderate",
-          "score": 75
-        },
-        "amines": {
-          "level": "high",
-          "score": 90
-        }
-      },
-      "preparation_modifiers": {},
-      "cross_reactivity_groups": [],
-      "notes": "Fermentation + sulfites + tyramine; diamine oxidase inhibitor (alcohol).",
-      "drug_interactions": [
-        {
-          "drug_class": "MAOI",
-          "interaction": "tyramine-induced hypertensive crisis",
-          "severity": "severe"
-        },
-        {
-          "drug_class": "DAO_inhibitors",
-          "interaction": "alcohol blocks DAO; compounds histamine",
-          "severity": "moderate"
-        }
-      ],
-      "sighi_rating": "3/3",
-      "rpah_classification": "high_amine"
     },
     {
       "id": "t8_001",
@@ -57041,98 +55816,6 @@
       "notes": "Ber e 1 allergen; very high selenium and nickel."
     },
     {
-      "id": "t8_009",
-      "name": "Macadamia Nuts",
-      "category": "Tree Nuts",
-      "subcategory": "Nut",
-      "common_names": [],
-      "allergen_profile": {
-        "gluten": {
-          "level": "none",
-          "score": 0
-        },
-        "dairy": {
-          "level": "none",
-          "score": 0
-        },
-        "soy": {
-          "level": "none",
-          "score": 0
-        },
-        "egg": {
-          "level": "none",
-          "score": 0
-        },
-        "tree_nuts": {
-          "level": "high",
-          "score": 85
-        },
-        "peanuts": {
-          "level": "none",
-          "score": 0
-        },
-        "fish": {
-          "level": "none",
-          "score": 0
-        },
-        "shellfish": {
-          "level": "none",
-          "score": 0
-        },
-        "nickel": {
-          "level": "moderate",
-          "score": 60
-        },
-        "histamine": {
-          "level": "none",
-          "score": 20
-        },
-        "fodmap_fructans": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_gos": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_lactose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_fructose": {
-          "level": "none",
-          "score": 0
-        },
-        "fodmap_polyols": {
-          "level": "none",
-          "score": 0
-        },
-        "salicylates": {
-          "level": "moderate",
-          "score": 55
-        },
-        "oxalates": {
-          "level": "none",
-          "score": 0
-        },
-        "lectins": {
-          "level": "none",
-          "score": 0
-        },
-        "sulfites": {
-          "level": "none",
-          "score": 0
-        },
-        "amines": {
-          "level": "none",
-          "score": 0
-        }
-      },
-      "preparation_modifiers": {},
-      "cross_reactivity_groups": [],
-      "notes": "Lower allergenicity than other tree nuts but still Big-9 listed."
-    },
-    {
       "id": "t8_010",
       "name": "Pistachio",
       "category": "Tree Nuts",
@@ -57514,7 +56197,7 @@
     },
     {
       "id": "t8_014",
-      "name": "Edamame",
+      "name": "Edamame (raw soybeans)",
       "category": "Legumes",
       "subcategory": "Soy",
       "common_names": [],
@@ -79172,7 +77855,7 @@
   "metadata": {
     "wave2_fixes_applied": true,
     "wave2_fix_date": "2026-04-05",
-    "food_count": 970,
+    "food_count": 956,
     "w2_2_expansion_applied": true,
     "w2_2_expansion_date": "2026-04-08",
     "w2_2b_expansion_applied": true,
@@ -79186,7 +77869,10 @@
     "w2_2f_expansion_applied": true,
     "w2_2f_expansion_date": "2026-04-10",
     "version": "2.6.0",
-    "total_items": 970,
-    "last_updated": "2026-04-12"
+    "total_items": 956,
+    "last_updated": "2026-07-24",
+    "dedup_applied": true,
+    "dedup_date": "2026-07-24",
+    "dedup_records_removed": 14
   }
 }
