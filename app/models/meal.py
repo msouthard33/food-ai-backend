@@ -17,17 +17,30 @@ class Meal(Base):
     __tablename__ = "meals"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     photo_url: Mapped[str | None] = mapped_column(Text)
     raw_description: Mapped[str | None] = mapped_column(Text)
     ai_parsed_description: Mapped[str | None] = mapped_column(Text)
     meal_type: Mapped[MealType] = mapped_column(
-        Enum(MealType, name="meal_type_enum", create_type=False), nullable=False
+        Enum(
+            MealType,
+            name="meal_type_enum",
+            create_type=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        nullable=False,
     )
     confidence_score: Mapped[Decimal] = mapped_column(Numeric(3, 2), default=Decimal("0.0"))
     processing_status: Mapped[ProcessingStatus] = mapped_column(
-        Enum(ProcessingStatus, name="processing_status_enum", create_type=False),
+        Enum(
+            ProcessingStatus,
+            name="processing_status_enum",
+            create_type=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
         default=ProcessingStatus.PENDING,
     )
     error_message: Mapped[str | None] = mapped_column(Text)
@@ -38,7 +51,9 @@ class Meal(Base):
 
     # Relationships
     user: Mapped["User"] = relationship(back_populates="meals")  # type: ignore[name-defined]
-    items: Mapped[list["MealItem"]] = relationship(back_populates="meal", cascade="all, delete-orphan")
+    items: Mapped[list["MealItem"]] = relationship(
+        back_populates="meal", cascade="all, delete-orphan"
+    )
     ai_conversations: Mapped[list["AIConversation"]] = relationship(
         back_populates="meal", cascade="all, delete-orphan"
     )
@@ -77,7 +92,13 @@ class MealItemComponent(Base):
         ForeignKey("meal_items.id", ondelete="CASCADE"), nullable=False
     )
     component_type: Mapped[ComponentType] = mapped_column(
-        Enum(ComponentType, name="componenttype"), nullable=False
+        Enum(
+            ComponentType,
+            name="componenttype",
+            create_type=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        nullable=False,
     )
     # estimated_level: allergen/compound load score on a 0–100 scale.
     # 0 = trace/undetectable, 100 = maximum known load for this component.

@@ -40,13 +40,25 @@ class User(Base):
     )
 
     # Relationships
-    conditions: Mapped[list["UserCondition"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    known_allergens: Mapped[list["UserKnownAllergen"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    settings: Mapped["UserSettings | None"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
+    conditions: Mapped[list["UserCondition"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    known_allergens: Mapped[list["UserKnownAllergen"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    settings: Mapped["UserSettings | None"] = relationship(
+        back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
     meals: Mapped[list["Meal"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # type: ignore[name-defined]
-    symptom_scores: Mapped[list["SymptomScore"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # type: ignore[name-defined]
-    sensitivity_profiles: Mapped[list["UserSensitivityProfile"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # type: ignore[name-defined]
-    combined_ratings: Mapped[list["FoodCombinedRating"]] = relationship(back_populates="user", cascade="all, delete-orphan")  # type: ignore[name-defined]
+    symptom_scores: Mapped[list["SymptomScore"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )  # type: ignore[name-defined]
+    sensitivity_profiles: Mapped[list["UserSensitivityProfile"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )  # type: ignore[name-defined]
+    combined_ratings: Mapped[list["FoodCombinedRating"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )  # type: ignore[name-defined]
 
 
 class UserCondition(Base):
@@ -54,14 +66,33 @@ class UserCondition(Base):
     __table_args__ = (UniqueConstraint("user_id", "condition_type"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    condition_type: Mapped[ConditionType] = mapped_column(Enum(ConditionType, name="condition_type_enum", create_type=False), nullable=False)
-    severity: Mapped[Severity | None] = mapped_column(Enum(Severity, name="severity_enum", create_type=False))
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    condition_type: Mapped[ConditionType] = mapped_column(
+        Enum(
+            ConditionType,
+            name="condition_type_enum",
+            create_type=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        nullable=False,
+    )
+    severity: Mapped[Severity | None] = mapped_column(
+        Enum(
+            Severity,
+            name="severity_enum",
+            create_type=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        )
+    )
     diagnosed_by_doctor: Mapped[bool] = mapped_column(Boolean, default=False)
     diagnosis_date: Mapped[date | None] = mapped_column(Date)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     user: Mapped["User"] = relationship(back_populates="conditions")
 
@@ -71,14 +102,33 @@ class UserKnownAllergen(Base):
     __table_args__ = (UniqueConstraint("user_id", "allergen_type"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    allergen_type: Mapped[ComponentType] = mapped_column(Enum(ComponentType, name="component_type_enum", create_type=False), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    allergen_type: Mapped[ComponentType] = mapped_column(
+        Enum(
+            ComponentType,
+            name="component_type_enum",
+            create_type=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        nullable=False,
+    )
     confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
-    severity: Mapped[Severity | None] = mapped_column(Enum(Severity, name="severity_enum", create_type=False))
+    severity: Mapped[Severity | None] = mapped_column(
+        Enum(
+            Severity,
+            name="severity_enum",
+            create_type=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        )
+    )
     reaction_notes: Mapped[str | None] = mapped_column(Text)
     first_reaction_date: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     user: Mapped["User"] = relationship(back_populates="known_allergens")
 
@@ -87,13 +137,17 @@ class UserSettings(Base):
     __tablename__ = "user_settings"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False
+    )
     notification_prefs: Mapped[dict] = mapped_column(JSONB, default=dict)
     symptom_prompt_intervals: Mapped[dict] = mapped_column(JSONB, default=dict)
     daily_checkin_time: Mapped[time] = mapped_column(Time, default=time(9, 0))
     preferred_language: Mapped[str] = mapped_column(String(5), default="en")
     units_preference: Mapped[str] = mapped_column(String(10), default="metric")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     user: Mapped["User"] = relationship(back_populates="settings")

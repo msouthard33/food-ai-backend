@@ -4,7 +4,17 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import ARRAY, Date, DateTime, Enum, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import (
+    ARRAY,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -39,7 +49,14 @@ class ComponentDefinition(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     component_type: Mapped[ComponentType] = mapped_column(
-        Enum(ComponentType, name="component_type_enum", create_type=False), nullable=False, unique=True
+        Enum(
+            ComponentType,
+            name="component_type_enum",
+            create_type=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        nullable=False,
+        unique=True,
     )
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
@@ -48,9 +65,7 @@ class ComponentDefinition(Base):
 
 class FoodComponentDetail(Base):
     __tablename__ = "food_component_details"
-    __table_args__ = (
-        UniqueConstraint("food_id", "component_type", name="uq_food_component"),
-    )
+    __table_args__ = (UniqueConstraint("food_id", "component_type", name="uq_food_component"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     # DB column name is "food_id"; Python attribute is "food_entry_id" for consistency with the FK
@@ -61,7 +76,13 @@ class FoodComponentDetail(Base):
         nullable=False,
     )
     component_type: Mapped[ComponentType] = mapped_column(
-        Enum(ComponentType, name="component_type_enum", create_type=False), nullable=False
+        Enum(
+            ComponentType,
+            name="component_type_enum",
+            create_type=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        nullable=False,
     )
     # DB column name is "level_score"; Python attribute is "level"
     level: Mapped[Decimal | None] = mapped_column("level_score", Numeric(3, 1))

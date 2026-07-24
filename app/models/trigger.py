@@ -18,16 +18,43 @@ class TriggerPrediction(Base):
     __table_args__ = (UniqueConstraint("user_id", "component_type"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    component_type: Mapped[ComponentType] = mapped_column(Enum(ComponentType, name="component_type_enum", create_type=False), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    component_type: Mapped[ComponentType] = mapped_column(
+        Enum(
+            ComponentType,
+            name="component_type_enum",
+            create_type=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        nullable=False,
+    )
     confidence_score: Mapped[int] = mapped_column(Numeric(3, 0), nullable=False)
     evidence_count: Mapped[int] = mapped_column(Integer, default=0)
     first_detected: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_updated: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    status: Mapped[TriggerStatus] = mapped_column(
-        Enum(TriggerStatus, name="trigger_status_enum", create_type=False), default=TriggerStatus.SUSPECT
+    last_updated: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
     )
-    symptom_types: Mapped[list[str] | None] = mapped_column(ARRAY(Enum(SymptomType, name="symptom_type_enum", create_type=False)))
+    status: Mapped[TriggerStatus] = mapped_column(
+        Enum(
+            TriggerStatus,
+            name="trigger_status_enum",
+            create_type=False,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        default=TriggerStatus.SUSPECT,
+    )
+    symptom_types: Mapped[list[str] | None] = mapped_column(
+        ARRAY(
+            Enum(
+                SymptomType,
+                name="symptom_type_enum",
+                create_type=False,
+                values_callable=lambda obj: [e.value for e in obj],
+            )
+        )
+    )
     average_time_lag_minutes: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -43,7 +70,9 @@ class CorrelationEvent(Base):
     trigger_prediction_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("trigger_predictions.id", ondelete="CASCADE"), nullable=False
     )
-    meal_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("meals.id", ondelete="CASCADE"), nullable=False)
+    meal_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("meals.id", ondelete="CASCADE"), nullable=False
+    )
     symptom_score_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("symptom_scores.id", ondelete="CASCADE"), nullable=False
     )
@@ -52,4 +81,6 @@ class CorrelationEvent(Base):
     symptom_severity: Mapped[int | None] = mapped_column(Numeric(3, 0))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    trigger_prediction: Mapped["TriggerPrediction"] = relationship(back_populates="correlation_events")
+    trigger_prediction: Mapped["TriggerPrediction"] = relationship(
+        back_populates="correlation_events"
+    )
