@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String
+from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -13,6 +13,8 @@ from app.database import Base
 
 class MedicationLog(Base):
     __tablename__ = "medication_logs"
+    # Composite index accelerates per-user, time-ranged medication scans (data export).
+    __table_args__ = (Index("ix_medication_logs_user_taken_at", "user_id", "taken_at"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -25,3 +27,5 @@ class MedicationLog(Base):
     dose_mg: Mapped[float | None] = mapped_column(Numeric(8, 2))
     taken_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # Soft delete — non-null marks the row as deleted; excluded from data export.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
