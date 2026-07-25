@@ -50,12 +50,12 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.enums import ComponentType, ConditionType
-from app.models.food import FoodComponentDetail
+from app.models.food import FoodComponentDetail, FoodEntry
 from app.models.meal import Meal
 from app.models.sensitivity import UserSensitivityProfile
 from app.models.symptom import SymptomScore
@@ -280,6 +280,7 @@ async def _load_component_levels(
 def _daily_component_exposure(
     meals: list[Meal],
     component_levels: dict[uuid.UUID, dict[ComponentType, float]],
+    name_to_food_id: dict[str, uuid.UUID] | None = None,
 ) -> tuple[set[date], dict[ComponentType, set[date]]]:
     """Per-day component exposure from meals + KB component levels.
 
@@ -287,19 +288,56 @@ def _daily_component_exposure(
     the user logged at least one meal (the day universe, so unexposed days exist),
     and ``exposed_days[component]`` is the subset of days on which some food carried
     that component at level >= EXPOSURE_LEVEL_THRESHOLD.
+
+    A meal item is resolved to a KB food by ``food_entry_id`` when present, else by a
+    case-insensitive name match against the food KB (``name_to_food_id``). The name
+    fallback matters because items logged through the API/AI pipeline carry a free-text
+    ``name`` but a NULL ``food_entry_id`` — without it, real diaries would register no
+    exposure and every component would collapse to its prior.
     """
+    name_to_food_id = name_to_food_id or {}
     meal_days: set[date] = set()
     exposed_days: dict[ComponentType, set[date]] = {}
     for meal in meals:
         day = meal.timestamp.date()
         meal_days.add(day)
         for item in meal.items:
-            if item.food_entry_id is None:
+            food_id = item.food_entry_id
+            if food_id is None:
+                food_id = name_to_food_id.get((item.name or "").strip().lower())
+            if food_id is None:
                 continue
-            for comp, level in component_levels.get(item.food_entry_id, {}).items():
+            for comp, level in component_levels.get(food_id, {}).items():
                 if level >= EXPOSURE_LEVEL_THRESHOLD:
                     exposed_days.setdefault(comp, set()).add(day)
     return meal_days, exposed_days
+
+
+async def _resolve_names_to_food_ids(
+    db: AsyncSession, names: set[str]
+) -> dict[str, uuid.UUID]:
+    """Map lowercased food names -> a KB ``FoodEntry.id`` (case-insensitive).
+
+    Used to attribute exposure for meal items that were logged by name only (NULL
+    ``food_entry_id``). When several KB rows share a name the smallest id is chosen
+    for determinism. Returns an empty dict for an empty input.
+    """
+    cleaned = {n.strip().lower() for n in names if n and n.strip()}
+    if not cleaned:
+        return {}
+    rows = (
+        await db.execute(
+            select(FoodEntry.id, FoodEntry.name).where(
+                func.lower(FoodEntry.name).in_(cleaned)
+            )
+        )
+    ).all()
+    out: dict[str, uuid.UUID] = {}
+    for food_id, name in sorted(rows, key=lambda r: str(r[0])):
+        key = name.strip().lower()
+        # first (smallest id, by the sort above) wins -> deterministic
+        out.setdefault(key, food_id)
+    return out
 
 
 def _symptom_outcome_days(
@@ -431,7 +469,13 @@ async def analyze_bayesian_triggers(
         (
             await db.execute(
                 select(Meal)
-                .where(and_(Meal.user_id == user_id, Meal.timestamp >= cutoff))
+                .where(
+                    and_(
+                        Meal.user_id == user_id,
+                        Meal.timestamp >= cutoff,
+                        Meal.deleted_at.is_(None),
+                    )
+                )
                 .options(selectinload(Meal.items))
             )
         ).scalars().unique().all()
@@ -443,8 +487,20 @@ async def analyze_bayesian_triggers(
         for item in meal.items
         if item.food_entry_id is not None
     }
+    # Items logged by name only (NULL food_entry_id) — resolve to KB foods so they
+    # still register exposure. Without this, API/AI-logged diaries score prior-only.
+    unlinked_names = {
+        item.name
+        for meal in meals
+        for item in meal.items
+        if item.food_entry_id is None and item.name
+    }
+    name_to_food_id = await _resolve_names_to_food_ids(db, unlinked_names)
+    food_ids |= set(name_to_food_id.values())
     component_levels = await _load_component_levels(db, food_ids)
-    meal_days, exposed_days = _daily_component_exposure(meals, component_levels)
+    meal_days, exposed_days = _daily_component_exposure(
+        meals, component_levels, name_to_food_id
+    )
 
     # Symptoms in the window (+ trailing lag so late symptoms after a late exposure
     # day are still matched).
@@ -456,6 +512,7 @@ async def analyze_bayesian_triggers(
                     and_(
                         SymptomScore.user_id == user_id,
                         SymptomScore.timestamp >= symptom_cutoff,
+                        SymptomScore.deleted_at.is_(None),
                     )
                 )
             )
@@ -507,3 +564,55 @@ def prior_mean(population_rate: float, implicated: bool) -> float:
     """Prior mean symptom-rate-given-exposure (0–1) for a component. Diagnostic."""
     alpha0, beta0 = _build_exposed_prior(population_rate, implicated)
     return beta_mean(alpha0, beta0)
+
+
+def cold_start_component_result(
+    component_type: ComponentType,
+    population_rate: float,
+    implicated: bool,
+) -> ComponentTriggerResult:
+    """Full cold-start (zero-data) ``ComponentTriggerResult`` from priors alone.
+
+    The posterior equals the prior (no observed days), so this is the exact result
+    ``analyze_bayesian_triggers`` would return for the component at zero data. Used by
+    ``trigger_service.seed_condition_priors`` to persist onboarding priors as real
+    Bayesian rows — the continuous prior→data blend, no hard synthetic-decay switch.
+    """
+    exposed_prior = _build_exposed_prior(population_rate, implicated)
+    unexposed_prior = _unexposed_prior()
+    return _score_component(
+        component_type,
+        exposed_days=set(),
+        meal_days=set(),
+        outcome_days=set(),
+        exposed_prior=exposed_prior,
+        unexposed_prior=unexposed_prior,
+    )
+
+
+async def food_components_by_name(
+    db: AsyncSession, names: set[str]
+) -> dict[str, set[ComponentType]]:
+    """Map each food NAME to the KB components it carries at exposure level.
+
+    Attribution helper for the suspect-foods leaderboard: it groups per-component
+    Bayesian results back onto the foods a patient actually logged (which are keyed
+    by free-text name). Only components at level >= EXPOSURE_LEVEL_THRESHOLD are
+    included, matching the exposure definition the engine scores against — so a
+    food's "driving component" is one that genuinely constituted an exposure, not a
+    trace amount. Names that match no KB food map to an empty set.
+    """
+    name_to_food_id = await _resolve_names_to_food_ids(db, names)
+    if not name_to_food_id:
+        return {}
+    levels = await _load_component_levels(db, set(name_to_food_id.values()))
+    out: dict[str, set[ComponentType]] = {}
+    for name_key, food_id in name_to_food_id.items():
+        comps = {
+            comp
+            for comp, level in levels.get(food_id, {}).items()
+            if level >= EXPOSURE_LEVEL_THRESHOLD
+        }
+        if comps:
+            out[name_key] = comps
+    return out

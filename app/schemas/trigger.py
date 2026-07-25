@@ -19,6 +19,12 @@ class TriggerPredictionOut(BaseModel):
     average_time_lag_minutes: int | None = None
     first_detected: datetime | None = None
     last_updated: datetime
+    # Versioned scoring contract (Bayesian Sprint 3): confidence_score is now the
+    # Beta-Binomial score (0–100). Field names/types unchanged for mobile.
+    method: str = "bayesian_beta_binomial"
+    # P(exposed symptom-rate > unexposed rate), 0–1 — the de-confounded posterior
+    # signal behind confidence_score. None on legacy rows scored before the wiring.
+    trigger_probability: float | None = None
     # "your_data" = derived from the real user's own diary.
     # "population_prior" = seeded from synthetic cohort / KB priors.
     # When TriggerPrediction.notes contains "source: kb_prior" (set by a future

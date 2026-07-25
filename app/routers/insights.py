@@ -20,11 +20,54 @@ from app.schemas.insights import (
 )
 from app.schemas.trigger import TriggerListOut, TriggerPredictionOut
 from app.services import trigger_service
+from app.services.bayesian_trigger import (
+    ComponentTriggerResult,
+    analyze_bayesian_triggers,
+    food_components_by_name,
+)
 from app.services.medication_service import (
     get_medicated_symptom_map,
     medication_adjusted_score,
 )
-from app.utils.confidence import evidence_confidence_label, wilson_interval
+from app.utils.confidence import evidence_confidence_label
+
+# Sentinel score for a food that resolves to no scored KB component — it cannot be
+# Bayesian-scored, so it sorts to the bottom rather than fabricating a proportion.
+_UNSCORED = ComponentTriggerResult(
+    component_type=None,  # type: ignore[arg-type]
+    trigger_probability=0.0,
+    score=0.0,
+    ci_low=0.0,
+    ci_high=0.0,
+    a=0, b=0, c=0, d=0,
+    n_exposed_days=0,
+    n_symptom_days=0,
+    alpha_post=0.0,
+    beta_post=0.0,
+    alpha_unexposed_post=0.0,
+    beta_unexposed_post=0.0,
+    prior_alpha=0.0,
+    prior_beta=0.0,
+    is_cold_start=True,
+)
+
+
+def _driver_for_food(
+    food_name: str,
+    name_comps: dict,
+    by_comp: dict,
+) -> ComponentTriggerResult:
+    """Pick the highest-scoring Bayesian component this food carries.
+
+    Attributes per-component posteriors back onto a logged food: a food's score is
+    the max over the components it carries (join food name -> KB FoodComponentDetail).
+    Returns the ``_UNSCORED`` sentinel when the food matches no scored component.
+    """
+    comps = name_comps.get((food_name or "").strip().lower(), set())
+    candidates = [by_comp[c] for c in comps if c in by_comp]
+    if not candidates:
+        return _UNSCORED
+    return max(candidates, key=lambda r: r.score)
 
 router = APIRouter(prefix="/api/v1/insights", tags=["insights"])
 
@@ -64,7 +107,10 @@ async def get_lag_correlation(
     """Return symptom-food correlations bucketed by 24h/48h/72h lag windows.
 
     For each (window, food, symptom) tuple, counts how many times the food
-    appeared in a meal within the lag window before the symptom event.
+    appeared in a meal within the lag window before the symptom event (``sample_size``,
+    a temporal co-occurrence view). The ``correlation_score`` is the Bayesian
+    Beta-Binomial association strength (0–100) of the food's driving component, so it
+    is consistent with the suspect-foods leaderboard rather than a raw frequency.
     Only tuples with sample_size >= 2 are returned.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
@@ -122,22 +168,27 @@ async def get_lag_correlation(
                         bucket["count"] += 1
                         bucket["symptom_ids"].add(symptom.id)
 
+    # Bayesian component posteriors (computed once) + food->component attribution.
+    bayes = await analyze_bayesian_triggers(db, user.id, lookback_days=lookback_days)
+    by_comp = {r.component_type: r for r in bayes}
+    food_names = {food_name for (_w, food_name, _s) in buckets}
+    name_comps = await food_components_by_name(db, food_names)
+
     for (window_hours, food_name, symptom_name), bucket in buckets.items():
         sample_size = bucket["count"]
         if sample_size >= 2:
-            # Correlation score: simple frequency normalized to 0-100
-            total_symptom_count = len(symptoms)
-            score = min(100.0, (sample_size / max(total_symptom_count, 1)) * 100)
+            driver = _driver_for_food(food_name, name_comps, by_comp)
             n_medicated = sum(1 for sid in bucket["symptom_ids"] if sid in medicated_map)
             rows.append(
                 LagCorrelationRow(
                     window_hours=window_hours,
                     food_name=food_name,
                     symptom_name=symptom_name,
-                    correlation_score=round(score, 2),
+                    correlation_score=round(driver.score, 2),
                     sample_size=sample_size,
                     n_medicated_episodes=n_medicated,
                     medication_confounded=n_medicated > 0,
+                    trigger_probability=round(driver.trigger_probability, 4),
                 )
             )
 
@@ -155,12 +206,15 @@ async def get_suspect_foods(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> SuspectFoodsOut:
-    """Return foods ranked by trigger correlation score.
+    """Return foods ranked by Bayesian trigger association score.
 
-    Only foods that preceded >= 3 distinct symptom episodes are included. Every entry
-    carries a medication-adjusted ``combined_score``, a 95% Wilson confidence interval,
-    the ``n_meals`` / ``n_symptom_episodes`` sample sizes, medication-covariate counts,
-    and a plain-English ``confidence_label`` (Day-One Value honest-confidence doctrine).
+    Only foods that preceded >= 3 distinct symptom episodes are included. Scoring is
+    the Beta-Binomial engine: a food's score is the max over the components it carries
+    (join food name -> KB FoodComponentDetail) of the per-component posterior. Every
+    entry carries a medication-adjusted ``combined_score``, a 95% Bayesian CREDIBLE
+    interval (``ci_low``/``ci_high``), the ``n_meals`` / ``n_symptom_episodes`` sample
+    sizes, medication-covariate counts, a plain-English ``confidence_label``, and the
+    de-confounded ``trigger_probability`` (Day-One Value honest-confidence doctrine).
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
 
@@ -219,7 +273,14 @@ async def get_suspect_foods(
         for food_name in {item.name for item in meal.items}:
             food_meal_counts[food_name] = food_meal_counts.get(food_name, 0) + 1
 
-    total_symptom_events = len(symptoms)
+    # Bayesian component posteriors (computed once) + food->component attribution.
+    bayes = await analyze_bayesian_triggers(db, user.id, lookback_days=lookback_days)
+    by_comp = {r.component_type: r for r in bayes}
+    qualifying_names = {
+        name for name, ids in food_episode_ids.items() if len(ids) >= 3
+    }
+    name_comps = await food_components_by_name(db, qualifying_names)
+
     result_foods: list[SuspectFoodRow] = []
 
     for food_name, episode_ids in food_episode_ids.items():
@@ -227,15 +288,16 @@ async def get_suspect_foods(
         if n_symptom_episodes < 3:
             continue
 
-        trigger_score = min(100.0, (n_symptom_episodes / max(total_symptom_events, 1)) * 100)
+        # Score = the food's driving Bayesian component (max over components carried).
+        driver = _driver_for_food(food_name, name_comps, by_comp)
+        trigger_score = driver.score  # pre-medication Bayesian score (back-compat)
+        ci_low, ci_high = driver.ci_low, driver.ci_high
 
         n_medicated = sum(1 for sid in episode_ids if sid in medicated_map)
         combined_score = medication_adjusted_score(
             trigger_score, n_symptom_episodes, n_medicated
         )
 
-        ci_low_p, ci_high_p = wilson_interval(n_symptom_episodes, total_symptom_events)
-        ci_low, ci_high = ci_low_p * 100, ci_high_p * 100
         confidence_label = evidence_confidence_label(n_symptom_episodes, ci_high - ci_low)
 
         result_foods.append(
@@ -251,6 +313,7 @@ async def get_suspect_foods(
                 medication_confounded=n_medicated > 0,
                 confidence_label=confidence_label,
                 sample_size=n_symptom_episodes,
+                trigger_probability=round(driver.trigger_probability, 4),
             )
         )
 
