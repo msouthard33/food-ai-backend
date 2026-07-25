@@ -491,9 +491,13 @@ async def insert_synthetic_patient(
         UUID of the newly created User.
     """
     user_id = uuid.uuid4()
+    # Unique email suffix so re-runs / batched top-ups never collide on
+    # users_email_key (the deterministic synthetic_{index} scheme collides
+    # when resuming a partially-completed seed). is_synthetic remains the
+    # authoritative marker.
     user = User(
         id=user_id,
-        email=f"synthetic_{profile['index']}@foodai.internal",
+        email=f"synthetic_{profile['index']}_{user_id.hex[:8]}@foodai.internal",
         is_synthetic=True,
     )
     db.add(user)
