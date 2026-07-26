@@ -62,6 +62,52 @@ async def test_get_meal_not_found(authed_client: AsyncClient):
     assert resp.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_add_meal_items_echoes_created_items(authed_client: AsyncClient):
+    """Regression: POST /items must return the newly-created items, not [].
+
+    The handler verifies ownership by loading the meal (with an empty `items`
+    collection) into the identity map before inserting. Without expiring that
+    stale collection, the re-fetch returns the cached meal and the response is
+    an empty list even though the rows were committed.
+    """
+    create_resp = await authed_client.post(
+        "/api/v1/meals",
+        json={
+            "timestamp": "2026-04-04T12:30:00Z",
+            "meal_type": "lunch",
+            "raw_description": "Chicken and rice",
+        },
+    )
+    assert create_resp.status_code == 201
+    meal_id = create_resp.json()["id"]
+
+    resp = await authed_client.post(
+        f"/api/v1/meals/{meal_id}/items",
+        json={
+            "items": [
+                {"name": "grilled chicken breast", "quantity": "6", "unit": "oz"},
+                {"name": "white rice", "quantity": "1", "unit": "cup"},
+            ]
+        },
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    # The core regression assertion: body is non-empty and echoes the posted names.
+    assert body, "POST /items returned an empty list"
+    assert len(body) == 2
+    returned_names = {item["name"] for item in body}
+    assert returned_names == {"grilled chicken breast", "white rice"}
+    for item in body:
+        assert item["meal_id"] == meal_id
+        assert "id" in item
+
+    # And a fresh GET reflects the same items (sanity check on persistence).
+    get_resp = await authed_client.get(f"/api/v1/meals/{meal_id}")
+    assert get_resp.status_code == 200
+    assert {item["name"] for item in get_resp.json()["items"]} == returned_names
+
+
 # ---------------------------------------------------------------------------
 # Photo analysis (W2-3 box 6). The vision LLM call is always mocked.
 # ---------------------------------------------------------------------------

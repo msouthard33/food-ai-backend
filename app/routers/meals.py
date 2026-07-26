@@ -177,8 +177,12 @@ async def add_meal_items(
     if not meal:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meal not found")
 
-    items = await meal_service.add_meal_items(db, meal_id, data.items)
-    # Re-fetch to get components loaded
+    await meal_service.add_meal_items(db, meal_id, data.items)
+    # The `meal` loaded above already has an (empty) `items` collection in the
+    # identity map; a plain re-fetch returns that same cached instance and its
+    # selectinload will NOT overwrite the already-loaded collection. Expire it
+    # first so the re-fetch repopulates `items` with the newly-inserted rows.
+    db.expire(meal, ["items"])
     meal = await meal_service.get_meal(db, meal_id, user.id)
     return [MealItemOut.model_validate(item) for item in (meal.items if meal else [])]
 
