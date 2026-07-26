@@ -117,6 +117,11 @@ def apply_preparation_modifiers(
 async def ingest_allergen_knowledge_base(db: AsyncSession, json_path: str | None = None) -> int:
     """Load allergen knowledge base from JSON and upsert into the database.
 
+    Foods are matched on the stable ``kb_id`` (the KB entry id) first, so a KB
+    rename updates the existing row in place instead of orphaning it and inserting
+    a duplicate. Name matching is kept only as a fallback for legacy rows that
+    predate the kb_id backfill.
+
     Args:
         db: Async database session.
         json_path: Optional path to the JSON file. Defaults to data/allergen_knowledge_base.json.
@@ -142,6 +147,14 @@ async def ingest_allergen_knowledge_base(db: AsyncSession, json_path: str | None
     # Support the v2.6.0 KB ({"version", "foods": [...]}) and the legacy flat list.
     records: list[dict] = data.get("foods", []) if isinstance(data, dict) else data
 
+    # Every kb_id present in this incoming KB — used by the orphan guard below to
+    # flag existing rows whose kb_id has disappeared from the KB.
+    incoming_kb_ids: set[str] = {
+        (r.get("id") or "").strip()
+        for r in records
+        if isinstance(r, dict) and (r.get("id") or "").strip()
+    }
+
     count = 0
     for record in records:
         if not isinstance(record, dict):
@@ -149,6 +162,7 @@ async def ingest_allergen_knowledge_base(db: AsyncSession, json_path: str | None
         food_name: str = (record.get("name") or record.get("food_name") or "").strip()
         if not food_name:
             continue
+        kb_id: str | None = (record.get("id") or "").strip() or None
 
         # v2.6.0 stores severities under "allergen_profile" as {"level","score"};
         # legacy stored bare numbers under "allergens".
@@ -158,11 +172,23 @@ async def ingest_allergen_knowledge_base(db: AsyncSession, json_path: str | None
         # search (common_names), the photo pipeline (allergen_profile,
         # preparation_modifiers) and cross-reactivity all have data. The full
         # 0-100 scores are preserved verbatim in the allergen_profile JSONB.
-        result = await db.execute(select(FoodEntry).where(FoodEntry.name == food_name))
-        entry = result.scalar_one_or_none()
+        #
+        # Match on the stable kb_id first (survives KB renames); fall back to name
+        # only for legacy rows without a kb_id. Matching by kb_id and updating the
+        # name in place is exactly what stops a rename from orphaning the old row.
+        entry = None
+        if kb_id:
+            result = await db.execute(select(FoodEntry).where(FoodEntry.kb_id == kb_id))
+            entry = result.scalar_one_or_none()
+        if entry is None:
+            result = await db.execute(select(FoodEntry).where(FoodEntry.name == food_name))
+            entry = result.scalar_one_or_none()
         if entry is None:
             entry = FoodEntry(name=food_name, date_added=date.today())
             db.add(entry)
+        # Keep the stable key and the (possibly renamed) name in sync.
+        entry.kb_id = kb_id or entry.kb_id
+        entry.name = food_name
         entry.category = record.get("category") or entry.category
         entry.subcategory = record.get("subcategory") or entry.subcategory
         # Array columns: never store NULL — >half the KB omits common_names, and a
@@ -207,6 +233,25 @@ async def ingest_allergen_knowledge_base(db: AsyncSession, json_path: str | None
                 detail.level = level
 
         count += 1
+
+    # Orphan guard: any existing row whose kb_id is NOT in the incoming KB would be
+    # left behind by this ingest (the source of the 2026-07-26 'Edamame'/'Kimchi'
+    # dupes). We do NOT delete here — cleanup is a human-gated operation — we only
+    # log so the drift is visible and can be reconciled deliberately.
+    if incoming_kb_ids:
+        orphan_result = await db.execute(
+            select(FoodEntry.kb_id, FoodEntry.name).where(FoodEntry.kb_id.is_not(None))
+        )
+        orphans = [
+            (kid, nm) for kid, nm in orphan_result.all() if kid not in incoming_kb_ids
+        ]
+        if orphans:
+            logger.warning(
+                "Ingest would orphan %d existing food row(s) whose kb_id is no longer "
+                "in the KB (not deleted — reconcile manually): %s",
+                len(orphans),
+                orphans[:10],
+            )
 
     await db.commit()
     logger.info("Ingested %d food entries from allergen knowledge base", count)
