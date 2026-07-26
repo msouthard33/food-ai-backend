@@ -19,6 +19,17 @@ class TriggerPredictionOut(BaseModel):
     average_time_lag_minutes: int | None = None
     first_detected: datetime | None = None
     last_updated: datetime
+    # Versioned scoring contract (Sprint H4): confidence_score is now the
+    # hierarchical-Bayes score (0–100). Field names/types unchanged for mobile.
+    method: str = "hierarchical_bayes_logistic"
+    # P(β_c > 0), 0–1 — the de-confounded posterior signal behind confidence_score.
+    # None on legacy rows scored before the wiring.
+    trigger_probability: float | None = None
+    # Frequentist FDR guardrail (the "hybrid" classical check): raw p-value for this
+    # component's 2x2 and whether its FDR verdict agrees with the Bayesian flag.
+    # None when the classical test was skipped (degenerate 2x2) or on legacy rows.
+    assoc_p_value: float | None = None
+    assoc_agreement: bool | None = None
     # "your_data" = derived from the real user's own diary.
     # "population_prior" = seeded from synthetic cohort / KB priors.
     # When TriggerPrediction.notes contains "source: kb_prior" (set by a future

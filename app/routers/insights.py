@@ -20,11 +20,73 @@ from app.schemas.insights import (
 )
 from app.schemas.trigger import TriggerListOut, TriggerPredictionOut
 from app.services import trigger_service
+from app.services.assoc_guardrail import (
+    BAYESIAN_TRIGGER_THRESHOLD,
+    GuardrailResult,
+    analyze_association_guardrail,
+)
+from app.services.hierarchical_trigger import (
+    ComponentTriggerResult,
+    analyze_hierarchical_triggers,
+    food_components_by_name,
+)
 from app.services.medication_service import (
     get_medicated_symptom_map,
     medication_adjusted_score,
 )
-from app.utils.confidence import evidence_confidence_label, wilson_interval
+from app.utils.confidence import evidence_confidence_label
+
+# Sentinel score for a food that resolves to no scored KB component — it cannot be
+# hierarchical-Bayes scored, so it sorts to the bottom rather than fabricating a value.
+_UNSCORED = ComponentTriggerResult(
+    component_type=None,  # type: ignore[arg-type]
+    trigger_probability=0.0,
+    score=0.0,
+    ci_low=0.0,
+    ci_high=0.0,
+    beta=0.0,
+    beta_se=0.0,
+    n_obs=0,
+    n_exposed=0,
+    is_cold_start=True,
+)
+
+
+def _driver_for_food(
+    food_name: str,
+    name_comps: dict[str, set],
+    by_comp: dict,
+) -> ComponentTriggerResult:
+    """Pick the highest-scoring hierarchical component this food carries.
+
+    Attributes per-component posteriors back onto a logged food: a food's score is the
+    max over the components it carries (join food name -> KB FoodComponentDetail).
+    Returns the ``_UNSCORED`` sentinel when the food matches no scored component.
+    """
+    comps = name_comps.get((food_name or "").strip().lower(), set())
+    candidates = [by_comp[c] for c in comps if c in by_comp]
+    if not candidates:
+        return _UNSCORED
+    return max(candidates, key=lambda r: r.score)
+
+
+def _guardrail_verdict(
+    driver: ComponentTriggerResult,
+    by_guard: dict,
+) -> tuple[float | None, bool | None]:
+    """(p_value, agreement) from the classical guardrail for a food's driver component.
+
+    Agreement = whether the Bayesian flag (trigger_probability >= threshold) matches
+    the guardrail's FDR-significance verdict. ``(None, None)`` when the component was
+    not tested (degenerate 2x2) or has no guardrail result. This surfaces the "our
+    Bayesian signal agrees with a classical association test" story per food.
+    """
+    guard: GuardrailResult | None = by_guard.get(driver.component_type)
+    if guard is None or guard.test == "skipped" or guard.p_value is None:
+        return None, None
+    bayes_flag = driver.trigger_probability >= BAYESIAN_TRIGGER_THRESHOLD
+    return round(guard.p_value, 8), (bayes_flag == guard.significant)
+
 
 router = APIRouter(prefix="/api/v1/insights", tags=["insights"])
 
@@ -63,9 +125,12 @@ async def get_lag_correlation(
 ) -> LagCorrelationOut:
     """Return symptom-food correlations bucketed by 24h/48h/72h lag windows.
 
-    For each (window, food, symptom) tuple, counts how many times the food
-    appeared in a meal within the lag window before the symptom event.
-    Only tuples with sample_size >= 2 are returned.
+    For each (window, food, symptom) tuple, counts how many times the food appeared in
+    a meal within the lag window before the symptom event (``sample_size``, a temporal
+    co-occurrence view). The ``correlation_score`` is the hierarchical-Bayes association
+    strength (0–100) of the food's driving component, so it is consistent with the
+    suspect-foods leaderboard rather than a raw frequency. Only tuples with
+    sample_size >= 2 are returned.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
     windows = [24, 48, 72]
@@ -122,22 +187,28 @@ async def get_lag_correlation(
                         bucket["count"] += 1
                         bucket["symptom_ids"].add(symptom.id)
 
+    # Hierarchical component posteriors (computed once) + food->component attribution.
+    hier = await analyze_hierarchical_triggers(db, user.id, lookback_days=lookback_days)
+    by_comp = {r.component_type: r for r in hier}
+    food_names = {food_name for (_w, food_name, _s) in buckets}
+    name_comps = await food_components_by_name(db, food_names)
+
     for (window_hours, food_name, symptom_name), bucket in buckets.items():
         sample_size = bucket["count"]
         if sample_size >= 2:
-            # Correlation score: simple frequency normalized to 0-100
-            total_symptom_count = len(symptoms)
-            score = min(100.0, (sample_size / max(total_symptom_count, 1)) * 100)
+            driver = _driver_for_food(food_name, name_comps, by_comp)
             n_medicated = sum(1 for sid in bucket["symptom_ids"] if sid in medicated_map)
             rows.append(
                 LagCorrelationRow(
                     window_hours=window_hours,
                     food_name=food_name,
                     symptom_name=symptom_name,
-                    correlation_score=round(score, 2),
+                    correlation_score=round(driver.score, 2),
                     sample_size=sample_size,
                     n_medicated_episodes=n_medicated,
                     medication_confounded=n_medicated > 0,
+                    method=driver.method,
+                    trigger_probability=round(driver.trigger_probability, 4),
                 )
             )
 
@@ -155,12 +226,16 @@ async def get_suspect_foods(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> SuspectFoodsOut:
-    """Return foods ranked by trigger correlation score.
+    """Return foods ranked by hierarchical-Bayes trigger association score.
 
-    Only foods that preceded >= 3 distinct symptom episodes are included. Every entry
-    carries a medication-adjusted ``combined_score``, a 95% Wilson confidence interval,
-    the ``n_meals`` / ``n_symptom_episodes`` sample sizes, medication-covariate counts,
-    and a plain-English ``confidence_label`` (Day-One Value honest-confidence doctrine).
+    Only foods that preceded >= 3 distinct symptom episodes are included. Scoring is the
+    hierarchical logistic engine: a food's score is the max over the components it
+    carries (join food name -> KB FoodComponentDetail) of the per-component posterior.
+    Every entry carries a medication-adjusted ``combined_score``, a 95% odds-ratio
+    CREDIBLE interval (``ci_low``/``ci_high``), the ``n_meals`` / ``n_symptom_episodes``
+    sample sizes, medication-covariate counts, a plain-English ``confidence_label``, the
+    de-confounded ``trigger_probability``, and the frequentist FDR guardrail's
+    ``assoc_p_value`` / ``assoc_agreement`` (the "hybrid" classical check).
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
 
@@ -219,7 +294,17 @@ async def get_suspect_foods(
         for food_name in {item.name for item in meal.items}:
             food_meal_counts[food_name] = food_meal_counts.get(food_name, 0) + 1
 
-    total_symptom_events = len(symptoms)
+    # Hierarchical posteriors + classical FDR guardrail (computed once each) + the
+    # food->component attribution needed to project them onto logged foods.
+    hier = await analyze_hierarchical_triggers(db, user.id, lookback_days=lookback_days)
+    by_comp = {r.component_type: r for r in hier}
+    guardrail = await analyze_association_guardrail(db, user.id, lookback_days=lookback_days)
+    by_guard = {g.component_type: g for g in guardrail}
+    qualifying_names = {
+        name for name, ids in food_episode_ids.items() if len(ids) >= 3
+    }
+    name_comps = await food_components_by_name(db, qualifying_names)
+
     result_foods: list[SuspectFoodRow] = []
 
     for food_name, episode_ids in food_episode_ids.items():
@@ -227,16 +312,18 @@ async def get_suspect_foods(
         if n_symptom_episodes < 3:
             continue
 
-        trigger_score = min(100.0, (n_symptom_episodes / max(total_symptom_events, 1)) * 100)
+        # Score = the food's driving hierarchical component (max over components carried).
+        driver = _driver_for_food(food_name, name_comps, by_comp)
+        trigger_score = driver.score  # pre-medication hierarchical score (back-compat)
+        ci_low, ci_high = driver.ci_low, driver.ci_high  # odds-ratio credible interval
 
         n_medicated = sum(1 for sid in episode_ids if sid in medicated_map)
         combined_score = medication_adjusted_score(
             trigger_score, n_symptom_episodes, n_medicated
         )
 
-        ci_low_p, ci_high_p = wilson_interval(n_symptom_episodes, total_symptom_events)
-        ci_low, ci_high = ci_low_p * 100, ci_high_p * 100
         confidence_label = evidence_confidence_label(n_symptom_episodes, ci_high - ci_low)
+        assoc_p, assoc_agree = _guardrail_verdict(driver, by_guard)
 
         result_foods.append(
             SuspectFoodRow(
@@ -251,6 +338,10 @@ async def get_suspect_foods(
                 medication_confounded=n_medicated > 0,
                 confidence_label=confidence_label,
                 sample_size=n_symptom_episodes,
+                method=driver.method,
+                trigger_probability=round(driver.trigger_probability, 4),
+                assoc_p_value=assoc_p,
+                assoc_agreement=assoc_agree,
             )
         )
 

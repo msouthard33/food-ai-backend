@@ -12,6 +12,9 @@ class LagCorrelationRow(BaseModel):
     window_hours: int
     food_name: str
     symptom_name: str
+    # Hierarchical-Bayes association strength (0–100) for this food's driving
+    # component — trigger_probability * 100 from the joint logistic engine. Field
+    # name kept for back-compat; semantics upgraded from the old proportion view.
     correlation_score: float
     sample_size: int
     # Medication co-log covariate (MCAS differentiator): how many of the symptom
@@ -19,6 +22,10 @@ class LagCorrelationRow(BaseModel):
     n_medicated_episodes: int = 0
     medication_confounded: bool = False
     evidence_source: str = "your_data"  # "your_data" | "population_prior"
+    # Versioned scoring contract (Sprint H4). Additive; mobile ignores unknown keys.
+    method: str = "hierarchical_bayes_logistic"
+    # P(β_c > 0) for the driving component, 0–1 — the de-confounded signal.
+    trigger_probability: float = 0.0
 
 
 class LagCorrelationOut(BaseModel):
@@ -28,11 +35,14 @@ class LagCorrelationOut(BaseModel):
 
 class SuspectFoodRow(BaseModel):
     food_name: str
-    # Raw proportion-based score: share of symptom episodes this food preceded (0–100).
+    # Pre-medication hierarchical-Bayes score (0–100) of this food's driving
+    # component — trigger_probability * 100. Field name retained for back-compat; the
+    # underlying value is now the joint-model score, not a raw proportion.
     trigger_score: float
     # Medication-adjusted headline score — discounts episodes that were medicated.
     combined_score: float
-    # 95% Wilson confidence interval on the association proportion (0–100 scale).
+    # 95% credible interval on the driving component's ODDS RATIO (>0; 1 = no effect).
+    # Same field names/type as before (was a 0–100 Wilson proportion interval).
     ci_low: float
     ci_high: float
     # Sample-size breakdown backing the score.
@@ -45,6 +55,16 @@ class SuspectFoodRow(BaseModel):
     # Retained for backward compatibility (== n_symptom_episodes).
     sample_size: int
     evidence_source: str = "your_data"  # "your_data" | "population_prior"
+    # Versioned scoring contract (Sprint H4): stable field names, new engine.
+    method: str = "hierarchical_bayes_logistic"
+    # P(β_c > 0) for the driving component, 0–1 — the de-confounded signal behind the
+    # score. A food eaten often but not raising the symptom odds scores low here.
+    trigger_probability: float = 0.0
+    # Frequentist FDR guardrail (the "hybrid" classical check): the driving
+    # component's raw p-value, and whether its FDR verdict agrees with the Bayesian
+    # flag. None when the classical 2x2 was degenerate/untestable.
+    assoc_p_value: float | None = None
+    assoc_agreement: bool | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property

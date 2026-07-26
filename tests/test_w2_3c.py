@@ -135,6 +135,10 @@ async def test_lag_correlation_with_data(authed_client: AsyncClient):
     data = resp.json()
     # Should have at least one correlation since meal is within 24h of symptoms
     assert data["total"] >= 0  # may or may not reach sample_size=2 threshold
+    for row in data["correlations"]:
+        # Versioned scoring contract present on every row.
+        assert row["method"] == "hierarchical_bayes_logistic"
+        assert 0.0 <= row["trigger_probability"] <= 1.0
 
 
 # ── GET /insights/suspect-foods ──────────────────────────────────────────
@@ -150,13 +154,19 @@ async def test_suspect_foods_empty(authed_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_suspect_foods_has_confidence_tier(authed_client: AsyncClient):
-    """When suspect foods are returned, each should have confidence_tier."""
+    """When suspect foods are returned, each should have confidence_tier + the
+    versioned hierarchical-Bayes / hybrid-guardrail fields."""
     resp = await authed_client.get("/api/v1/insights/suspect-foods")
     assert resp.status_code == 200
     data = resp.json()
     for food in data["foods"]:
         assert "confidence_tier" in food
         assert food["confidence_tier"] in ("Well-established", "Some evidence", "AI estimate")
+        # Versioned scoring contract + hybrid classical guardrail fields present.
+        assert food["method"] == "hierarchical_bayes_logistic"
+        assert 0.0 <= food["trigger_probability"] <= 1.0
+        assert "assoc_p_value" in food
+        assert "assoc_agreement" in food
 
 
 # ── POST /protocols/start ────────────────────────────────────────────────

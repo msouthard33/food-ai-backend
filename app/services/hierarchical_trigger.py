@@ -73,12 +73,12 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.enums import ComponentType, ConditionType
-from app.models.food import FoodComponentDetail
+from app.models.food import FoodComponentDetail, FoodEntry
 from app.models.meal import Meal
 from app.models.sensitivity import UserSensitivityProfile
 from app.models.symptom import SymptomScore
@@ -129,6 +129,12 @@ NEWTON_TOL = 1e-8
 #: Numerical floors.
 _PROB_EPS = 1e-6          # clip p away from {0,1} so W stays positive-definite
 _HESSIAN_JITTER = 1e-8    # tiny ridge added to the Hessian diagonal for invertibility
+
+#: FoodComponentDetail.level (0–4) at/above which a food counts as "carrying" a
+#: component for leaderboard ATTRIBUTION (food -> driving component). Matches the
+#: flat engine's exposure threshold so the suspect-foods join is consistent with a
+#: genuine exposure rather than a trace amount.
+ATTRIBUTION_LEVEL_THRESHOLD = 2.0
 
 
 # ── Result type ───────────────────────────────────────────────────────────────
@@ -381,25 +387,61 @@ async def _load_component_levels(
     return out
 
 
+async def _resolve_names_to_food_ids(
+    db: AsyncSession, names: set[str]
+) -> dict[str, uuid.UUID]:
+    """Map lowercased food names -> a KB ``FoodEntry.id`` (case-insensitive).
+
+    Meal items logged through the API/AI pipeline carry a free-text ``name`` but a
+    NULL ``food_entry_id``; without this resolution those items would register no
+    exposure and every component would collapse to its prior on real diaries. When
+    several KB rows share a name the smallest id is chosen for determinism. Returns
+    an empty dict for empty input.
+    """
+    cleaned = {n.strip().lower() for n in names if n and n.strip()}
+    if not cleaned:
+        return {}
+    rows = (
+        await db.execute(
+            select(FoodEntry.id, FoodEntry.name).where(
+                func.lower(FoodEntry.name).in_(cleaned)
+            )
+        )
+    ).all()
+    out: dict[str, uuid.UUID] = {}
+    for food_id, name in sorted(rows, key=lambda r: str(r[0])):
+        out.setdefault(name.strip().lower(), food_id)  # first (smallest id) wins
+    return out
+
+
 def _daily_component_loads(
     meals: list[Meal],
     component_levels: dict[uuid.UUID, dict[ComponentType, float]],
+    name_to_food_id: dict[str, uuid.UUID] | None = None,
 ) -> tuple[dict[date, dict[ComponentType, float]], set[ComponentType]]:
     """Aggregate KB component levels into a per-day load per component.
 
     Returns ``(daily_loads, observed_components)`` where ``daily_loads[day][comp]``
     is the summed ``FoodComponentDetail.level`` (0–4) across every meal item that day
     carrying that component, and ``observed_components`` is every component seen.
+
+    A meal item is resolved to a KB food by ``food_entry_id`` when present, else by a
+    case-insensitive name match (``name_to_food_id``) so API/AI-logged items (NULL
+    ``food_entry_id``) still register exposure.
     """
+    name_to_food_id = name_to_food_id or {}
     daily_loads: dict[date, dict[ComponentType, float]] = {}
     observed: set[ComponentType] = set()
     for meal in meals:
         day = meal.timestamp.date()
         bucket = daily_loads.setdefault(day, {})
         for item in meal.items:
-            if item.food_entry_id is None:
+            food_id = item.food_entry_id
+            if food_id is None:
+                food_id = name_to_food_id.get((item.name or "").strip().lower())
+            if food_id is None:
                 continue
-            for comp, level in component_levels.get(item.food_entry_id, {}).items():
+            for comp, level in component_levels.get(food_id, {}).items():
                 bucket[comp] = bucket.get(comp, 0.0) + level
                 observed.add(comp)
     return daily_loads, observed
@@ -511,8 +553,20 @@ async def analyze_hierarchical_triggers(
         for item in meal.items
         if item.food_entry_id is not None
     }
+    # Items logged by name only (NULL food_entry_id) — resolve to KB foods so they
+    # still register exposure. Without this, API/AI-logged diaries score prior-only.
+    unlinked_names = {
+        item.name
+        for meal in meals
+        for item in meal.items
+        if item.food_entry_id is None and item.name
+    }
+    name_to_food_id = await _resolve_names_to_food_ids(db, unlinked_names)
+    food_ids |= set(name_to_food_id.values())
     component_levels = await _load_component_levels(db, food_ids)
-    daily_loads, observed = _daily_component_loads(meals, component_levels)
+    daily_loads, observed = _daily_component_loads(
+        meals, component_levels, name_to_food_id
+    )
 
     # Symptom days in the window (respect soft-deletes).
     symptom_times = (
@@ -591,5 +645,98 @@ async def analyze_hierarchical_triggers(
             )
         )
 
+    results.sort(key=lambda r: r.score, reverse=True)
+    return results
+
+
+# ── Attribution + cold-start helpers (endpoint / seeding plumbing) ─────────────
+
+async def food_components_by_name(
+    db: AsyncSession, names: set[str]
+) -> dict[str, set[ComponentType]]:
+    """Map each food NAME to the KB components it carries at the attribution level.
+
+    Attribution helper for the suspect-foods leaderboard: it groups the per-component
+    hierarchical results back onto the foods a patient actually logged (which are keyed
+    by free-text name). Only components at level >= ``ATTRIBUTION_LEVEL_THRESHOLD`` are
+    included, so a food's "driving component" is one that genuinely constituted an
+    exposure, not a trace amount. Names matching no KB food map to an empty set.
+    """
+    name_to_food_id = await _resolve_names_to_food_ids(db, names)
+    if not name_to_food_id:
+        return {}
+    levels = await _load_component_levels(db, set(name_to_food_id.values()))
+    out: dict[str, set[ComponentType]] = {}
+    for name_key, food_id in name_to_food_id.items():
+        comps = {
+            comp
+            for comp, level in levels.get(food_id, {}).items()
+            if level >= ATTRIBUTION_LEVEL_THRESHOLD
+        }
+        if comps:
+            out[name_key] = comps
+    return out
+
+
+async def cold_start_results(
+    db: AsyncSession,
+    condition_types: list[str],
+    population_prior: dict[ComponentType, tuple[float, float]] | None = None,
+) -> list[ComponentTriggerResult]:
+    """Prior-only (zero-data) results for a set of declared conditions.
+
+    Cold start = the MAP collapses to the prior mean and the Laplace covariance to the
+    prior covariance (``fit_penalized_logistic`` with an empty design). For each
+    ComponentType implicated by ``condition_types`` (``CONDITION_PRIORS``) this returns
+    the exact result ``analyze_hierarchical_triggers`` would produce at zero diary data,
+    so condition-implicated components come back elevated (μ_c > 0) rather than at zero.
+    Used by ``trigger_service.seed_condition_priors`` to persist onboarding priors
+    through the same path the data-driven analysis uses. Empty when no condition is
+    recognised.
+    """
+    condition_keys = [c.lower().strip() for c in condition_types]
+    implicated = _implicated_components(condition_keys)
+    if not implicated:
+        return []
+
+    if population_prior is None:
+        population_prior = await build_population_prior(db)
+
+    candidates = sorted(implicated, key=lambda c: c.value)
+    mu = np.empty(len(candidates) + 1)
+    lam = np.empty(len(candidates) + 1)
+    mu[0] = float(np.log(BACKGROUND_SYMPTOM_RATE / (1.0 - BACKGROUND_SYMPTOM_RATE)))
+    lam[0] = INTERCEPT_PRECISION
+    for i, comp in enumerate(candidates):
+        pop_mean, pop_prec = population_prior.get(comp, (0.0, DEFAULT_COMPONENT_PRECISION))
+        mu[i + 1] = float(np.clip(pop_mean + CLINICAL_SEED_MEAN, -MAX_PRIOR_MEAN, MAX_PRIOR_MEAN))
+        lam[i + 1] = pop_prec
+
+    beta, cov = fit_penalized_logistic(
+        np.empty((0, len(candidates) + 1)), np.empty((0,)), mu, lam
+    )
+
+    results: list[ComponentTriggerResult] = []
+    for i, comp in enumerate(candidates):
+        b = float(beta[i + 1])
+        var = float(cov[i + 1, i + 1])
+        se = float(np.sqrt(var)) if var > 0.0 else 0.0
+        trigger_probability = normal_cdf(b, mu=0.0, sigma=se) if se > 0.0 else (
+            1.0 if b > 0.0 else 0.0
+        )
+        results.append(
+            ComponentTriggerResult(
+                component_type=comp,
+                trigger_probability=trigger_probability,
+                score=trigger_probability * 100.0,
+                ci_low=float(np.exp(b - 1.96 * se)),
+                ci_high=float(np.exp(b + 1.96 * se)),
+                beta=b,
+                beta_se=se,
+                n_obs=0,
+                n_exposed=0,
+                is_cold_start=True,
+            )
+        )
     results.sort(key=lambda r: r.score, reverse=True)
     return results
