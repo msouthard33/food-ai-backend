@@ -13,16 +13,20 @@ the exact banned identifiers). Everything it knows about the signal arrives as
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
+
+from sqlalchemy import func, select
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.meal import Meal
 from app.models.user import User
 from app.services.clinician_report_service import (
     _styles,
@@ -31,18 +35,161 @@ from app.services.clinician_report_service import (
 )
 from app.services.summary_signal import SummarySignalRow, build_summary_signal_rows
 
-# Plain-English labels for the engine-agnostic enums the seam emits.
-_DIRECTION_LABEL = {
-    "trigger": "Possible trigger",
-    "protective": "Not a trigger (protective)",
-    "inconclusive": "Unclear",
+# ── §5 canonical copy tables (W2_summary_report_layout.md — TONE GATE CLOSED
+#    2026-07-26). The grouped definition-list is CANONICAL over the deprecated
+#    7-column table (§8.3). All strings are the FINAL approved (neutralized/hybrid)
+#    versions; the pinned verb "line up with", the pinned trigger header, and the
+#    pinned protective-strong string are preserved verbatim. A bold tier word always
+#    leads; a number never leads and never stands bare (D9 doctrine). ─────────────
+
+#: §5.1 fixed group order + exact subheadings (plain-English, non-color glyph label).
+_GROUP_ORDER = ("trigger", "protective", "inconclusive")
+_GROUP_HEADING = {
+    "trigger": "Worth discussing with your doctor",
+    "protective": "Seems to sit well with you so far",
+    "inconclusive": "No clear pattern yet",
 }
-_CONFIDENCE_LABEL = {
-    "strong": "Strong",
-    "moderate": "Moderate",
-    "preliminary": "Preliminary",
-    "insufficient": "Insufficient data",
+
+#: §5.2 signal readouts, keyed by (direction, confidence). Bold tier word leads.
+#: `{food}` = food_name verbatim. inconclusive collapses across all four tiers.
+_READOUT = {
+    ("trigger", "strong"): (
+        "<b>Worth discussing</b> — across enough logs, {food} consistently "
+        "lined up with your higher-symptom days."
+    ),
+    ("trigger", "moderate"): (
+        "<b>Some evidence</b> — {food} tended to line up with your "
+        "higher-symptom days."
+    ),
+    ("trigger", "preliminary"): (
+        "<b>Early signal</b> — {food} has begun to line up with your "
+        "higher-symptom days, but it's too soon to say."
+    ),
+    ("trigger", "insufficient"): (
+        "<b>Not enough yet</b> — {food} came up, but there aren't enough logs "
+        "yet to say whether it lines up with your symptoms."
+    ),
+    ("protective", "strong"): (
+        "<b>Sits well so far</b> — across enough logs, {food} did <i>not</i> "
+        "line up with your higher-symptom days. That's a reassuring sign, not a "
+        "guarantee."
+    ),
+    ("protective", "moderate"): (
+        "<b>Looks okay so far</b> — {food} tended not to line up with your "
+        "higher-symptom days in this window."
+    ),
+    ("protective", "preliminary"): (
+        "<b>Leaning okay</b> — early logs suggest {food} isn't lining up with "
+        "your symptoms, but it's still early."
+    ),
+    ("protective", "insufficient"): (
+        "<b>Not enough yet</b> — {food} came up, but there aren't enough logs "
+        "yet to say either way."
+    ),
 }
+#: §5.2 inconclusive — one string for any confidence tier (no tier gradient).
+_INCONCLUSIVE_READOUT = (
+    "<b>No clear pattern</b> — {food} showed up in your logs, but it didn't "
+    "clearly line up <i>with</i> or <i>against</i> your symptoms in this window."
+)
+
+#: §5.4 demoted-caveat strings, selected by substring of `demotion_reason`.
+#: Plain-language only; never names the guardrail test, FDR, p-value, or the engine.
+_CAVEAT_SMALL_SAMPLE = (
+    "We're showing this for completeness, but it's based on very few logs — "
+    "please read it as a hint, not a finding."
+)
+_CAVEAT_DISAGREE = (
+    "Our check-tests don't fully agree on this one yet, so we've held it back from a "
+    "stronger reading. It needs more logs before it means much."
+)
+_CAVEAT_MIXED = (
+    "The signal here is mixed — the pattern points one way but isn't consistent "
+    "enough to lean on. Treat it as unsettled."
+)
+_CAVEAT_GENERIC = (
+    "We're showing this with extra caution — the evidence isn't strong enough "
+    "yet to read it as more than an early hint."
+)
+
+#: §5.6 empty / thin-window state (warm patient voice retained).
+_EMPTY_STATE = (
+    "<b>No food signals yet — here's why.</b> It usually takes two to three "
+    "weeks of logging before patterns are steady enough to show here. Your {meals} "
+    "meals and {symptom_entries} symptom entries so far are already building the "
+    "picture. Keep logging what you can, and this section fills in."
+)
+
+#: ordinal confidence rank for within-group sort (never a numeric-score sort).
+_CONF_RANK = {"strong": 0, "moderate": 1, "preliminary": 2, "insufficient": 3}
+
+
+def _readout_string(r: SummarySignalRow) -> str:
+    """The FINAL §5.2 readout for a row's (direction, confidence), food interpolated."""
+    if r.direction == "inconclusive":
+        template = _INCONCLUSIVE_READOUT
+    else:
+        template = _READOUT.get(
+            (r.direction, r.confidence),
+            _INCONCLUSIVE_READOUT,
+        )
+    return template.format(food=r.food_name)
+
+
+def _count_phrase(n: int, word: str) -> str:
+    """Bold-number, singular/plural sample-size fragment (e.g. '<b>1</b> day')."""
+    return f"<b>{n}</b> {word}" if n == 1 else f"<b>{n}</b> {word}s"
+
+
+def _sample_size_line(r: SummarySignalRow) -> str:
+    """§5.3 mandatory honest-denominator line — rendered on EVERY row, no exceptions."""
+    return (
+        f"Based on {_count_phrase(r.exposed_count, 'day')} you logged {r.food_name} "
+        f"and {_count_phrase(r.control_count, 'day')} you didn't, across "
+        f"{_count_phrase(r.symptom_episodes, 'symptom episode')} in this window."
+    )
+
+
+def _demoted_caveat(reason: str | None) -> str:
+    """§5.4 caveat string selected by substring of ``demotion_reason`` (OQ-4)."""
+    text = (reason or "").lower()
+    if "small sample" in text or "threshold" in text or "insufficient" in text:
+        return _CAVEAT_SMALL_SAMPLE
+    if "association test disagrees" in text or "guardrail" in text or "check" in text:
+        return _CAVEAT_DISAGREE
+    if "direction conflicts" in text or "effect size" in text or "spans 1" in text:
+        return _CAVEAT_MIXED
+    return _CAVEAT_GENERIC
+
+
+def _supporting_detail_line(r: SummarySignalRow) -> str | None:
+    """§5.5 clinician-only supporting detail. None unless every field is present."""
+    if r.test == "skipped":
+        return None
+    if r.odds_ratio is None or r.ci_low is None or r.ci_high is None:
+        return None
+    line = (
+        f"Supporting detail (for clinicians): odds ratio {r.odds_ratio:.2f} "
+        f"(95% CI {r.ci_low:.2f}–{r.ci_high:.2f}), {r.test} test"
+    )
+    if r.p_value is not None:
+        line += f", p = {r.p_value:.3f}"
+    return line + "."
+
+
+def _group_sort_key(r: SummarySignalRow) -> tuple:
+    """Within-group order: undemoted first, then confidence tier, then episodes desc.
+
+    Never sorts by any numeric score (there is none on the contract). Demoted rows sink
+    to the bottom of their direction group so a demoted trigger never sits among the
+    confirmed 'Worth discussing' rows (§5.4).
+    """
+    return (
+        1 if r.demoted else 0,
+        _CONF_RANK.get(r.confidence, 9),
+        -r.symptom_episodes,
+        r.food_name.lower(),
+    )
 
 
 async def build_summary_report_data(
@@ -59,6 +206,16 @@ async def build_summary_report_data(
     signal_rows = await build_summary_signal_rows(
         db, user.id, lookback_days=lookback_days
     )
+    cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+    meals_count = await db.scalar(
+        select(func.count())
+        .select_from(Meal)
+        .where(
+            Meal.user_id == user.id,
+            Meal.timestamp >= cutoff,
+            Meal.deleted_at.is_(None),
+        )
+    )
     return {
         "user": base["user"],
         "lookback_days": base["lookback_days"],
@@ -70,80 +227,96 @@ async def build_summary_report_data(
         "pro_symptom_summary": base["pro_symptom_summary"],
         "pro_wellness": base["pro_wellness"],
         "signal_rows": signal_rows,
+        "meals_count": int(meals_count or 0),
+        "symptom_entries_count": len(base["timeline"]),
     }
 
 
-def _signal_section(story: list, st: dict, rows: list[SummarySignalRow]) -> None:
-    """Render the trigger-signal section from stable ``SummarySignalRow`` fields only."""
+def _signal_section(
+    story: list,
+    st: dict,
+    rows: list[SummarySignalRow],
+    *,
+    clinician_detail: bool = False,
+    meals: int | None = None,
+    symptom_entries: int | None = None,
+) -> None:
+    """Render §2 as the CANONICAL grouped definition-list (not the deprecated table).
+
+    Rows are grouped by ``direction`` in the fixed §5.1 order under the exact
+    subheadings; within a group they sort by ordinal confidence then ``symptom_episodes``
+    desc (never by a numeric score), with demoted rows sunk to the bottom and rendered at
+    reduced weight (§5.4). Each row renders, in linear screen-reader order (§8.3):
+    (a) the FINAL §5.2 readout, (b) the mandatory §5.3 sample-size line, (c) the §5.4
+    caveat when demoted, and (d) the §5.5 supporting detail ONLY when ``clinician_detail``
+    is on (default OFF patient-side). References ONLY ``SummarySignalRow`` fields.
+    """
     story.append(Paragraph("2. Food Signals", st["heading"]))
+
+    # §5.6 empty / thin-window state — never a dead end (warm patient voice retained).
     if not rows:
         story.append(
             Paragraph(
-                "No food reached the reporting threshold in this period. Signals appear "
-                "as more meals and symptoms are logged.",
+                _EMPTY_STATE.format(
+                    meals="your" if meals is None else meals,
+                    symptom_entries="your" if symptom_entries is None else symptom_entries,
+                ),
                 st["body"],
             )
         )
         return
 
-    header = [
-        "Food", "Reading", "Confidence", "Days eaten",
-        "Days not eaten", "Symptom days", "Odds ratio (95% CI)",
-    ]
-    data = [header]
+    subhead = ParagraphStyle(
+        "SigSubhead", parent=st["heading"], fontSize=11,
+        spaceBefore=10, spaceAfter=4,
+    )
+    readout_style = st["body"]
+    detail_style = ParagraphStyle(
+        "SigDetail", parent=st["small"], leftIndent=12,
+    )
+    demoted_readout_style = ParagraphStyle(
+        "SigDemotedReadout", parent=st["small"], leftIndent=12,
+        textColor=colors.HexColor("#6B6B6B"),
+    )
+
+    by_direction: dict[str, list[SummarySignalRow]] = {d: [] for d in _GROUP_ORDER}
     for r in rows:
-        reading = _DIRECTION_LABEL.get(r.direction, r.direction)
-        if r.demoted:
-            reading = f"{reading} *"
-        if r.odds_ratio is None or r.ci_low is None or r.ci_high is None:
-            or_cell = "not testable"
-        else:
-            or_cell = f"{r.odds_ratio:.2f} ({r.ci_low:.2f}-{r.ci_high:.2f})"
-        data.append(
-            [
-                r.food_name,
-                reading,
-                _CONFIDENCE_LABEL.get(r.confidence, r.confidence),
-                str(r.exposed_count),
-                str(r.control_count),
-                str(r.symptom_episodes),
-                or_cell,
-            ]
-        )
-    story.append(
-        _table(
-            data,
-            [1.3 * inch, 1.35 * inch, 1.0 * inch, 0.7 * inch,
-             0.75 * inch, 0.7 * inch, 1.4 * inch],
-        )
-    )
-    story.append(Spacer(1, 0.05 * inch))
+        by_direction.setdefault(r.direction, []).append(r)
 
-    # Plain-English caveat for demoted rows (rows carrying a "*").
-    demoted_reasons = sorted(
-        {r.demotion_reason for r in rows if r.demoted and r.demotion_reason}
-    )
-    if demoted_reasons:
-        caveat = "  ".join(f"* {reason}." for reason in demoted_reasons)
-        story.append(
-            Paragraph("<b>Rows marked *</b> are shown but not confirmed: " + caveat, st["small"])
-        )
-        story.append(Spacer(1, 0.04 * inch))
-    story.append(
-        Paragraph(
-            'A "Reading" describes the direction of the association only (possible '
-            "trigger, not a trigger, or unclear); it is not a diagnosis. Confidence is "
-            "an ordinal strength tier based on how the food's exposed vs. not-exposed "
-            "days line up with symptom days, cross-checked by a classical association "
-            "test. Sample sizes are shown so weak signals are not over-read. Association "
-            "is not causation.",
-            st["small"],
-        )
-    )
+    for direction in _GROUP_ORDER:
+        group = by_direction.get(direction, [])
+        if not group:
+            continue
+        story.append(Paragraph(_GROUP_HEADING[direction], subhead))
+        for r in sorted(group, key=_group_sort_key):
+            # (a) readout — demoted rows render at reduced weight (§5.4), never a
+            #     confirmed 'Worth discussing' headline.
+            story.append(
+                Paragraph(
+                    _readout_string(r),
+                    demoted_readout_style if r.demoted else readout_style,
+                )
+            )
+            # (b) mandatory sample-size line on EVERY row (§5.3).
+            story.append(Paragraph(_sample_size_line(r), detail_style))
+            # (c) honesty caveat immediately after, when demoted (§5.4).
+            if r.demoted:
+                story.append(Paragraph(_demoted_caveat(r.demotion_reason), detail_style))
+            # (d) clinician-only supporting detail, small aside (§5.5).
+            if clinician_detail:
+                detail = _supporting_detail_line(r)
+                if detail is not None:
+                    story.append(Paragraph(detail, detail_style))
+            story.append(Spacer(1, 0.04 * inch))
 
 
-def render_summary_pdf(data: dict) -> bytes:
-    """Render the assembled summary-report data dict to PDF bytes."""
+def render_summary_pdf(data: dict, *, clinician_detail: bool = False) -> bytes:
+    """Render the assembled summary-report data dict to PDF bytes.
+
+    ``clinician_detail`` gates the §5.5 supporting-detail (odds ratio / CI) line; it is
+    OFF by default for the patient-facing share and may be turned on for a
+    clinician-requested export.
+    """
     buf = BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=letter,
@@ -198,7 +371,14 @@ def render_summary_pdf(data: dict) -> bytes:
         story.append(Paragraph("No symptoms recorded in this period.", st["body"]))
 
     # -- 2. Food signals (from the provider seam ONLY) ------------------------
-    _signal_section(story, st, data["signal_rows"])
+    _signal_section(
+        story,
+        st,
+        data["signal_rows"],
+        clinician_detail=clinician_detail,
+        meals=data.get("meals_count"),
+        symptom_entries=data.get("symptom_entries_count"),
+    )
 
     # -- 3. Elimination-protocol status ---------------------------------------
     story.append(Paragraph("3. Elimination Protocol Status", st["heading"]))
@@ -278,10 +458,12 @@ async def generate_summary_pdf(
     db: AsyncSession,
     user: User,
     lookback_days: int = 30,
+    *,
+    clinician_detail: bool = False,
 ) -> bytes:
     """End-to-end: gather data then render the doctor/patient summary PDF."""
     data = await build_summary_report_data(db, user, lookback_days)
-    return render_summary_pdf(data)
+    return render_summary_pdf(data, clinician_detail=clinician_detail)
 
 
 def summary_pdf_filename(user_id: uuid.UUID) -> str:

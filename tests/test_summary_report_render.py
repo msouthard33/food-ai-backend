@@ -1,23 +1,21 @@
 """Snapshot / format + contract-guard tests for the doctor/patient summary
 report SIGNAL SECTION (Wave 2, Pillar 4).
 
-Adds three things the shipped ``test_summary_signal.py`` did not cover:
+Reconciled 2026-07-26 (QA-SUMRPT-1) to the CANONICAL grouped **definition-list**
+(``W2_summary_report_layout.md`` §5 / §8.3) — the deprecated 7-column table is gone.
+These tests assert on the real rendered flowables (``Paragraph.getPlainText()``):
 
-  1. **Render snapshot for every ``direction`` x ``confidence`` combination** — the
-     rendered signal section must show the right tier wording, must carry the
-     exposed/control/episodes sample-size numbers on EVERY row, and must never leak a
-     forbidden token (score / posterior / P(beta / credible / Bayes / lag / 24-72h).
-  2. **Demotion honesty at the render layer** — every demoted row renders its caveat
-     and is marked (``*``); only an undemoted ``trigger`` row is a confirmed headline.
-  3. **A strengthened, AST-based contract guard** across the whole report/export layer
-     (``summary_report_service`` + ``reports`` + ``summary_signal`` outside the
-     ``assoc_guardrail`` seam call) — no current-engine OUTPUT-SHAPE identifier and no
-     literal lag-window (24/36/48/72h) may appear in CODE. This is the mechanical
-     enforcement that lets the rewired engine drop in with zero template changes.
-
-These operate on the flowables ``_signal_section`` builds (extracting text from
-``Paragraph.getPlainText()`` and ``Table._cellvalues``) so they assert on real rendered
-output, not on the dataclass.
+  1. **Every ``direction`` x ``confidence`` renders its FINAL §5.2 readout** — the bold
+     tier word leads, the pinned verb "line up" is present, the food name is embedded,
+     the mandatory §5.3 sample-size line rides on EVERY row, and no forbidden token
+     (score / posterior / P(beta / credible / Bayes / lag / 24-72h) leaks.
+  2. **Grouping + demotion honesty** — rows group under the exact §5.1 subheadings in
+     the fixed trigger -> protective -> inconclusive order; demoted rows sink to the
+     bottom of their group, render at reduced weight, and carry their §5.4 caveat; an
+     undemoted trigger is the ONLY confirmed 'Worth discussing' headline (no caveat).
+  3. **The AST-based contract guard** across the whole report/export layer — no
+     current-engine OUTPUT-SHAPE identifier and no literal lag-window (24/36/48/72h)
+     may appear in CODE, and the render layer reads ONLY ``SummarySignalRow`` fields.
 """
 
 import ast
@@ -29,8 +27,11 @@ import pytest
 from app.services import summary_report_service as srs
 from app.services import summary_signal as ss
 from app.services.summary_report_service import (
-    _CONFIDENCE_LABEL,
-    _DIRECTION_LABEL,
+    _CAVEAT_DISAGREE,
+    _CAVEAT_GENERIC,
+    _CAVEAT_MIXED,
+    _CAVEAT_SMALL_SAMPLE,
+    _GROUP_HEADING,
     _signal_section,
 )
 from app.services.summary_signal import SummarySignalRow, _demotion
@@ -38,27 +39,21 @@ from app.services.summary_signal import SummarySignalRow, _demotion
 
 # ── helpers ─────────────────────────────────────────────────────────────────────
 
-def _render_text(rows):
-    """Render the signal section and return (full_text, table_cell_rows, paragraphs)."""
+def _render_text(rows, *, clinician_detail=False):
+    """Render the signal section and return (full_text, ordered_paragraph_texts)."""
     from app.services.clinician_report_service import _styles
 
     story: list = []
-    _signal_section(story, _styles(), rows)
+    _signal_section(story, _styles(), rows, clinician_detail=clinician_detail)
 
-    paragraphs: list[str] = []
-    table_rows: list[list[str]] = []
-    for flow in story:
-        if hasattr(flow, "getPlainText"):
-            paragraphs.append(flow.getPlainText())
-        elif hasattr(flow, "_cellvalues"):
-            for r in flow._cellvalues:
-                table_rows.append([str(c) for c in r])
-    full = "\n".join(paragraphs + ["\t".join(r) for r in table_rows])
-    return full, table_rows, paragraphs
+    paragraphs: list[str] = [
+        flow.getPlainText() for flow in story if hasattr(flow, "getPlainText")
+    ]
+    return "\n".join(paragraphs), paragraphs
 
 
 def _row(direction, confidence, *, demoted=None, reason=None,
-         exposed=7, control=11, episodes=5, testable=True):
+         exposed=7, control=11, episodes=5, testable=True, food="Cheddar"):
     if demoted is None:
         demoted, reason = _demotion(direction, confidence)
     if testable:
@@ -67,7 +62,7 @@ def _row(direction, confidence, *, demoted=None, reason=None,
         or_ = lo = hi = pv = None
         test = "skipped"
     return SummarySignalRow(
-        food_name="Cheddar",
+        food_name=food,
         direction=direction,
         confidence=confidence,
         demoted=demoted,
@@ -82,6 +77,22 @@ def _row(direction, confidence, *, demoted=None, reason=None,
 _DIRECTIONS = ("trigger", "protective", "inconclusive")
 _CONFIDENCES = ("strong", "moderate", "preliminary", "insufficient")
 
+#: FINAL §5.2 leading tier word for each (direction, confidence). Bold word always
+#: leads the readout sentence (D9 doctrine: a number never leads).
+_TIER_WORD = {
+    ("trigger", "strong"): "Worth discussing",
+    ("trigger", "moderate"): "Some evidence",
+    ("trigger", "preliminary"): "Early signal",
+    ("trigger", "insufficient"): "Not enough yet",
+    ("protective", "strong"): "Sits well so far",
+    ("protective", "moderate"): "Looks okay so far",
+    ("protective", "preliminary"): "Leaning okay",
+    ("protective", "insufficient"): "Not enough yet",
+}
+_INCONCLUSIVE_TIER = "No clear pattern"
+
+_ALL_CAVEATS = (_CAVEAT_SMALL_SAMPLE, _CAVEAT_DISAGREE, _CAVEAT_MIXED, _CAVEAT_GENERIC)
+
 #: Rendered-string bans (design spec §9 + signal contract §0). Case-insensitive.
 _FORBIDDEN_RENDER = [
     "score", "posterior", "p(beta", "credible", "bayes", "combined_score",
@@ -93,98 +104,169 @@ _FORBIDDEN_RENDER_RE = re.compile("|".join(re.escape(t) for t in _FORBIDDEN_REND
 _LAG_RE = re.compile(r"\b(24|36|48|72)\s*h\b|\blag\b", re.IGNORECASE)
 
 
-# ── 1. snapshot: every direction x confidence renders the right tier wording ─────
+def _expected_tier(direction, confidence):
+    return _INCONCLUSIVE_TIER if direction == "inconclusive" else _TIER_WORD[(direction, confidence)]
+
+
+# ── 1. snapshot: every direction x confidence renders the FINAL §5.2 readout ─────
 
 @pytest.mark.parametrize("direction,confidence", list(product(_DIRECTIONS, _CONFIDENCES)))
-def test_every_direction_confidence_combo_renders_correct_tier_wording(direction, confidence):
+def test_every_direction_confidence_renders_final_readout(direction, confidence):
     row = _row(direction, confidence)
-    full, table_rows, _ = _render_text([row])
+    full, paragraphs = _render_text([row])
 
-    # exactly one data row under the header
-    data = [r for r in table_rows if r and r[0] == "Cheddar"]
-    assert len(data) == 1, "one rendered row per signal"
-    cells = data[0]
-
-    # the direction label leads the "Reading" cell (may carry a demotion '*')
-    assert _DIRECTION_LABEL[direction] in cells[1]
-    # the ordinal confidence tier word is rendered verbatim
-    assert _CONFIDENCE_LABEL[confidence] in cells[2]
+    tier = _expected_tier(direction, confidence)
+    headings = set(_GROUP_HEADING.values())
+    # the bold tier word LEADS the readout sentence (a number never leads). The
+    # readout carries the em-dash separator; exclude the same-prefixed group heading.
+    readout = next(
+        (p for p in paragraphs
+         if p.lstrip().startswith(tier) and p not in headings and "—" in p),
+        None,
+    )
+    assert readout is not None, f"no readout led by {tier!r} in {paragraphs!r}"
+    # the food name is embedded in the readout sentence
+    assert "Cheddar" in readout
+    # never the banned causal verbs, anywhere in the section
+    assert "caused" not in full.lower()
+    assert "associated with" not in full.lower()
     # no engine-shape / probability / lag vocabulary leaks into rendered text
     assert not _FORBIDDEN_RENDER_RE.search(full), f"forbidden token in: {full!r}"
     assert not _LAG_RE.search(full), f"lag vocabulary leaked: {full!r}"
 
 
-def test_render_labels_cover_all_contract_enum_values():
-    # every enum value the seam can emit has a plain-English render label
-    assert set(_DIRECTION_LABEL) == set(_DIRECTIONS)
-    assert set(_CONFIDENCE_LABEL) == set(_CONFIDENCES)
+def test_pinned_association_verb_used_never_causal():
+    # "line up with" is the pinned non-causal stand-in — present across the readout
+    # matrix, and the banned causal verbs never appear.
+    for direction, confidence in product(_DIRECTIONS, _CONFIDENCES):
+        full, _ = _render_text([_row(direction, confidence)])
+        assert "caused" not in full.lower()
+        assert "associated with" not in full.lower()
+    # the pinned verb surfaces on the readouts that assert a pattern
+    strong_trig, _ = _render_text([_row("trigger", "strong")])
+    assert re.search(r"\bline(d|s)?\b|\blining\b", strong_trig)
 
 
-# ── 2. sample-size line present on EVERY row (Pillar 5, mandatory) ───────────────
+def test_final_approved_strings_render_verbatim():
+    # spot-check the two PINNED verbatim strings survive rendering exactly (tone gate)
+    strong_trig, _ = _render_text([_row("trigger", "strong", food="Cheddar")])
+    assert "across enough logs, Cheddar consistently lined up with your higher-symptom days" in strong_trig
+
+    prot_strong, _ = _render_text([_row("protective", "strong", food="Rice", demoted=False, reason=None)])
+    assert (
+        "across enough logs, Rice did not line up with your higher-symptom days. "
+        "That's a reassuring sign, not a guarantee." in prot_strong
+    )
+
+    incon, _ = _render_text([_row("inconclusive", "moderate", food="Toast")])
+    assert (
+        "Toast showed up in your logs, but it didn't clearly line up with or against "
+        "your symptoms in this window." in incon
+    )
+
+
+# ── 2. sample-size line present on EVERY row (Pillar 5, mandatory §5.3) ───────────
 
 @pytest.mark.parametrize("direction,confidence", list(product(_DIRECTIONS, _CONFIDENCES)))
-def test_sample_size_numbers_present_on_every_row(direction, confidence):
+def test_sample_size_line_present_on_every_row(direction, confidence):
     row = _row(direction, confidence, exposed=7, control=11, episodes=5)
-    _, table_rows, _ = _render_text([row])
-    cells = next(r for r in table_rows if r and r[0] == "Cheddar")
-    # exposed / control / symptom-episode counts each render as their own cell
-    assert "7" in cells and "11" in cells and "5" in cells, cells
+    full, paragraphs = _render_text([row])
+    sample = next((p for p in paragraphs if p.startswith("Based on")), None)
+    assert sample is not None, f"missing mandatory sample-size line: {paragraphs!r}"
+    assert "7 days" in sample and "11 days" in sample and "5 symptom episodes" in sample
 
 
-def test_sample_size_shows_zero_control_days_not_testable_hidden():
-    # the contrast-collapse case (0 control days) must still surface the honest denom
-    row = _row("trigger", "moderate", exposed=18, control=0, episodes=18)
-    _, table_rows, _ = _render_text([row])
-    cells = next(r for r in table_rows if r and r[0] == "Cheddar")
-    assert "18" in cells and "0" in cells
+def test_sample_size_singular_plural_and_zero_control():
+    # the contrast-collapse case (0 control days) still surfaces the honest denominator
+    row = _row("trigger", "moderate", exposed=1, control=0, episodes=1)
+    _, paragraphs = _render_text([row])
+    sample = next(p for p in paragraphs if p.startswith("Based on"))
+    assert "1 day" in sample and "0 days" in sample and "1 symptom episode" in sample
+    assert "1 days" not in sample  # singular respected
 
 
-# ── 3. demotion honesty at the render layer ─────────────────────────────────────
+# ── 3. grouping + demotion honesty (§5.1 / §5.4) ─────────────────────────────────
 
-def test_only_undemoted_trigger_is_a_confirmed_headline():
-    for direction, confidence in product(_DIRECTIONS, _CONFIDENCES):
-        row = _row(direction, confidence)
-        _, table_rows, _ = _render_text([row])
-        cells = next(r for r in table_rows if r and r[0] == "Cheddar")
-        marked = cells[1].endswith("*")
-        confirmed = (direction == "trigger" and confidence in ("strong", "moderate"))
-        # demoted rows are always marked; confirmed headlines never are
-        assert marked == (not confirmed), (direction, confidence, cells[1])
+def test_groups_render_under_exact_subheadings_in_fixed_order():
+    rows = [
+        _row("inconclusive", "moderate", food="Toast"),
+        _row("protective", "strong", food="Rice"),
+        _row("trigger", "strong", food="Cheddar"),
+    ]
+    full, paragraphs = _render_text(rows)
+    i_trig = paragraphs.index(_GROUP_HEADING["trigger"])
+    i_prot = paragraphs.index(_GROUP_HEADING["protective"])
+    i_incon = paragraphs.index(_GROUP_HEADING["inconclusive"])
+    assert i_trig < i_prot < i_incon, paragraphs
 
 
-def test_every_demoted_row_renders_its_caveat():
+def test_demoted_rows_sink_to_bottom_of_their_group():
+    # an undemoted trigger and a demoted trigger share the trigger group; the
+    # confirmed headline renders first, the demoted row (never 'Worth discussing') last
+    rows = [
+        _row("trigger", "insufficient", food="Kimchi"),  # demoted
+        _row("trigger", "strong", food="Cheddar"),        # confirmed headline
+    ]
+    _, paragraphs = _render_text(rows)
+    confirmed = next(i for i, p in enumerate(paragraphs) if p.lstrip().startswith("Worth discussing"))
+    demoted = next(i for i, p in enumerate(paragraphs) if p.lstrip().startswith("Not enough yet"))
+    assert confirmed < demoted, paragraphs
+
+
+def test_every_demoted_row_renders_a_caveat():
     demoted_combos = [
-        (d, c) for d, c in product(_DIRECTIONS, _CONFIDENCES)
-        if _demotion(d, c)[0]
+        (d, c) for d, c in product(_DIRECTIONS, _CONFIDENCES) if _demotion(d, c)[0]
     ]
     for direction, confidence in demoted_combos:
-        row = _row(direction, confidence)
-        full, table_rows, paragraphs = _render_text([row])
-        cells = next(r for r in table_rows if r and r[0] == "Cheddar")
-        assert cells[1].endswith("*"), (direction, confidence)
-        # the demotion reason surfaces as a plain-English caveat paragraph
-        assert row.demotion_reason is not None
-        assert any("shown but not confirmed" in p for p in paragraphs), full
-        assert row.demotion_reason in full
+        full, _ = _render_text([_row(direction, confidence)])
+        assert any(cav in full for cav in _ALL_CAVEATS), (direction, confidence, full)
 
 
-def test_protective_strong_never_renders_as_confirmed_trigger():
-    # the Garlic-mis-attribution guard: a protective food, even at 'strong', is demoted
+def test_confirmed_trigger_headline_has_no_caveat():
+    for confidence in ("strong", "moderate"):
+        full, _ = _render_text([_row("trigger", confidence)])
+        assert not any(cav in full for cav in _ALL_CAVEATS), (confidence, full)
+
+
+def test_protective_strong_never_a_confirmed_trigger():
+    # the Garlic-mis-attribution guard: a protective food, even 'strong', is demoted
     row = _row("protective", "strong")
-    _, table_rows, _ = _render_text([row])
-    cells = next(r for r in table_rows if r and r[0] == "Cheddar")
-    assert cells[1].endswith("*")
-    assert _DIRECTION_LABEL["trigger"] not in cells[1]
+    full, paragraphs = _render_text([row])
+    # renders under the protective subheading, carries a caveat, never 'Worth discussing'
+    assert _GROUP_HEADING["protective"] in paragraphs
+    assert any(cav in full for cav in _ALL_CAVEATS)
+    assert "Worth discussing" not in full
 
 
-def test_empty_signal_list_renders_no_dead_end():
-    full, _, paragraphs = _render_text([])
+def test_empty_signal_list_renders_warm_no_dead_end():
+    full, paragraphs = _render_text([])
     assert paragraphs, "empty state must render explanatory copy, not a blank"
-    assert "No food reached the reporting threshold" in full
+    assert "No food signals yet" in full
+    assert "Keep logging what you can" in full
     assert "No data" not in full  # patient-dignity: never a dead-end wall
 
 
-# ── 4. strengthened contract guard (AST, whole report/export layer) ─────────────
+# ── 4. §5.5 clinician-only supporting detail (default OFF patient-side) ───────────
+
+def test_supporting_detail_hidden_by_default():
+    full, _ = _render_text([_row("trigger", "strong")])  # clinician_detail defaults OFF
+    assert "Supporting detail" not in full
+    assert "odds ratio" not in full
+
+
+def test_supporting_detail_shown_only_when_toggle_on():
+    full, _ = _render_text([_row("trigger", "strong")], clinician_detail=True)
+    assert "Supporting detail (for clinicians)" in full
+    assert "odds ratio 2.50" in full and "95% CI 1.40" in full and "fisher test" in full
+
+
+def test_supporting_detail_omitted_for_skipped_test_even_with_toggle():
+    full, _ = _render_text([_row("inconclusive", "insufficient", testable=False)],
+                           clinician_detail=True)
+    assert "Supporting detail" not in full
+
+
+# ── 5. strengthened contract guard (AST, whole report/export layer) — UNCHANGED ──
 
 #: engine OUTPUT-SHAPE identifiers that must never appear as code in the report layer.
 _BANNED_ENGINE_IDENTIFIERS = {
@@ -285,7 +367,7 @@ def test_signal_row_is_the_only_shape_the_render_layer_reads():
     row_fields = set(SummarySignalRow.__dataclass_fields__)
     read_attrs: set[str] = set()
     for node in ast.walk(render_src):
-        # attributes read off the loop variable `r` in _signal_section
+        # attributes read off the loop variable `r` in _signal_section / helpers
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
             if node.value.id == "r":
                 read_attrs.add(node.attr)
