@@ -27,6 +27,11 @@ class FoodEntry(Base):
     __tablename__ = "food_database"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Stable business key = the KB entry id (e.g. "grain_001", "t8_014"). The PK is a
+    # random uuid, so before this column existed the ingest upsert matched on `name`,
+    # which orphaned rows whenever a KB rename changed the name (see the 2026-07-26
+    # 'Edamame'/'Kimchi' dedup). Nullable for legacy rows that predate the backfill.
+    kb_id: Mapped[str | None] = mapped_column(String(64), index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     category: Mapped[str | None] = mapped_column(String(100))
     subcategory: Mapped[str | None] = mapped_column(String(100))

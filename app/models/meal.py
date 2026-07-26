@@ -23,7 +23,16 @@ class Meal(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
+    # occurred-at: when the meal was actually eaten (client-supplied, UTC-normalised).
+    # `created_at` below is the distinct logged-at (server insert) time.
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Capture-precision metadata (Wave 2, Pillar 2 — additive, nullable).
+    # IANA zone name or UTC offset the client captured `timestamp` in, retained so
+    # the future exposure/lag layer can reconstruct local wall-clock time.
+    client_timezone: Mapped[str | None] = mapped_column(String(64))
+    # "exact" (picked/known time) vs "approximate" (estimated) — informs how much
+    # the lag layer should trust the meal time. Defaults to "exact".
+    time_precision: Mapped[str | None] = mapped_column(String(16), server_default="exact")
     photo_url: Mapped[str | None] = mapped_column(Text)
     raw_description: Mapped[str | None] = mapped_column(Text)
     ai_parsed_description: Mapped[str | None] = mapped_column(Text)

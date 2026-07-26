@@ -16,11 +16,14 @@ from app.schemas.meal import MealCreate, MealItemCreate
 async def create_meal(db: AsyncSession, user_id: uuid.UUID, data: MealCreate) -> Meal:
     meal = Meal(
         user_id=user_id,
-        # Default to current time if not provided; Meal.timestamp is non-nullable
+        # occurred-at: default to current time (UTC) if not provided; non-nullable.
         timestamp=data.timestamp or datetime.now(timezone.utc),
         # Default to SNACK if not provided; Meal.meal_type is non-nullable
         meal_type=data.meal_type or MealType.SNACK,
         raw_description=data.raw_description,
+        # Additive capture-precision fields (default time_precision handled by DB).
+        client_timezone=data.client_timezone,
+        time_precision=data.time_precision,
     )
     db.add(meal)
     await db.flush()

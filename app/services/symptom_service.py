@@ -1,7 +1,7 @@
 """Symptom score CRUD operations."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,11 +18,15 @@ async def create_symptom_score(
     score = SymptomScore(
         user_id=user_id,
         meal_id=data.meal_id,
-        timestamp=data.timestamp,
+        # occurred-at: default to current time (UTC) if omitted; non-nullable.
+        timestamp=data.timestamp or datetime.now(timezone.utc),
+        onset_at=data.onset_at,
         symptom_type=data.symptom_type,
         vas_score=data.vas_score,
         notes=data.notes,
         prompt_type=data.prompt_type,
+        client_timezone=data.client_timezone,
+        time_precision=data.time_precision,
     )
     db.add(score)
     await db.flush()
