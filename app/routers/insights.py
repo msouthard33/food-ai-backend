@@ -212,7 +212,8 @@ async def get_lag_correlation(
                 )
             )
 
-    rows.sort(key=lambda r: r.correlation_score, reverse=True)
+    # Deterministic tie-break (score, then food, then window) — see get_suspect_foods.
+    rows.sort(key=lambda r: (-r.correlation_score, r.food_name, r.window_hours))
     return LagCorrelationOut(correlations=rows, total=len(rows))
 
 
@@ -322,8 +323,16 @@ async def get_suspect_foods(
             trigger_score, n_symptom_episodes, n_medicated
         )
 
-        confidence_label = evidence_confidence_label(n_symptom_episodes, ci_high - ci_low)
+        confidence_label = evidence_confidence_label(n_symptom_episodes, ci_low, ci_high)
         assoc_p, assoc_agree = _guardrail_verdict(driver, by_guard)
+
+        # Honesty demotion: when the classical FDR guardrail actively DISAGREES with
+        # the Bayesian flag (assoc_agreement is False — the guardrail tested this
+        # component and did not corroborate), cap the label at "Preliminary". A
+        # single-method claim we can't cross-validate is never surfaced as an
+        # established signal. (None = guardrail had no verdict → no demotion.)
+        if assoc_agree is False and confidence_label != "Preliminary":
+            confidence_label = "Preliminary"
 
         result_foods.append(
             SuspectFoodRow(
@@ -345,5 +354,7 @@ async def get_suspect_foods(
             )
         )
 
-    result_foods.sort(key=lambda f: f.combined_score, reverse=True)
+    # Break score ties by food name so the leaderboard order is deterministic (the raw
+    # dict/set iteration order that feeds this is hash-seed dependent).
+    result_foods.sort(key=lambda f: (-f.combined_score, f.food_name))
     return SuspectFoodsOut(foods=result_foods, total=len(result_foods))
