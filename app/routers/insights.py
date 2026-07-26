@@ -25,6 +25,7 @@ from app.services.assoc_guardrail import (
     GuardrailResult,
     analyze_association_guardrail,
 )
+from app.services.case_crossover import analyze_case_crossover_triggers
 from app.services.hierarchical_trigger import (
     ComponentTriggerResult,
     analyze_hierarchical_triggers,
@@ -306,6 +307,18 @@ async def get_suspect_foods(
     }
     name_comps = await food_components_by_name(db, qualifying_names)
 
+    # PRIMARY scorer: the within-person case-crossover (Phase 3 bake-off winner). It is
+    # food-level, so unlike the component model it can exonerate an innocent food that
+    # merely shares a trigger's component. The component model stays as the FALLBACK for
+    # any food the case-crossover cannot test (no within-person exposure discordance),
+    # and its per-component guardrail remains the corroborating agreement check.
+    cc_by_food = {
+        r.food_name: r
+        for r in await analyze_case_crossover_triggers(
+            db, user.id, lookback_days=lookback_days, candidate_foods=qualifying_names
+        )
+    }
+
     result_foods: list[SuspectFoodRow] = []
 
     for food_name, episode_ids in food_episode_ids.items():
@@ -313,10 +326,19 @@ async def get_suspect_foods(
         if n_symptom_episodes < 3:
             continue
 
-        # Score = the food's driving hierarchical component (max over components carried).
-        driver = _driver_for_food(food_name, name_comps, by_comp)
-        trigger_score = driver.score  # pre-medication hierarchical score (back-compat)
-        ci_low, ci_high = driver.ci_low, driver.ci_high  # odds-ratio credible interval
+        driver = _driver_for_food(food_name, name_comps, by_comp)  # component fallback + guardrail
+        cc = cc_by_food.get(food_name)
+        if cc is not None and cc.testable:
+            trigger_score = cc.score               # 0–100 decoupled rank/flag score
+            ci_low, ci_high = cc.ci_low, cc.ci_high  # odds-ratio 95% CI
+            method = cc.method
+            trigger_probability = cc.score / 100.0
+        else:
+            # Cold-start / untestable food -> per-component hierarchical driver.
+            trigger_score = driver.score
+            ci_low, ci_high = driver.ci_low, driver.ci_high
+            method = driver.method
+            trigger_probability = driver.trigger_probability
 
         n_medicated = sum(1 for sid in episode_ids if sid in medicated_map)
         combined_score = medication_adjusted_score(
@@ -347,8 +369,8 @@ async def get_suspect_foods(
                 medication_confounded=n_medicated > 0,
                 confidence_label=confidence_label,
                 sample_size=n_symptom_episodes,
-                method=driver.method,
-                trigger_probability=round(driver.trigger_probability, 4),
+                method=method,
+                trigger_probability=round(trigger_probability, 4),
                 assoc_p_value=assoc_p,
                 assoc_agreement=assoc_agree,
             )
