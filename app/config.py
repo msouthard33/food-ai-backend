@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     # Admin
     admin_api_key: str = ""  # REQUIRED in production — set ADMIN_API_KEY env var
 
+    # Demo login — lets the mobile app enter a fully-authenticated demo session
+    # without Supabase. Set DEMO_LOGIN_ENABLED=false to disable in real production.
+    demo_login_enabled: bool = True
+    demo_login_ttl_seconds: int = 43200  # 12h
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
