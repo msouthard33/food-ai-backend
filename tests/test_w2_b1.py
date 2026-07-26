@@ -45,30 +45,69 @@ def _client_for(uid: uuid.UUID) -> AsyncClient:
     )
 
 
+async def _seed_kb_food(name: str = UNIQUE_FOOD) -> None:
+    """Insert a KB FoodEntry (carrying FODMAP at exposure level) named ``name``.
+
+    The hierarchical engine attributes exposure via the food KB — meal items logged
+    through the API carry a NULL ``food_entry_id`` and are resolved to KB foods by
+    (case-insensitive) name. Idempotent: skips if a FoodEntry with ``name`` exists.
+    """
+    from decimal import Decimal
+
+    from app.models.enums import ComponentType
+    from app.models.food import FoodComponentDetail, FoodEntry
+
+    async with async_session_factory() as session:
+        existing = (
+            await session.execute(
+                text("SELECT id FROM food_database WHERE lower(name) = lower(:n) LIMIT 1"),
+                {"n": name},
+            )
+        ).first()
+        if existing is not None:
+            return
+        food = FoodEntry(name=name)
+        session.add(food)
+        await session.flush()
+        session.add(
+            FoodComponentDetail(
+                food_entry_id=food.id,
+                component_type=ComponentType.FODMAP,
+                level=Decimal("3.0"),
+            )
+        )
+        await session.commit()
+
+
 async def _seed_trigger(client: AsyncClient, n_symptoms: int, food: str = UNIQUE_FOOD) -> list[str]:
-    """Create one meal containing ``food`` and ``n_symptoms`` symptoms after it.
+    """Seed ``food`` (KB-linked) eaten on ``n_symptoms`` distinct days, each followed
+    by a symptom, so the hierarchical engine sees the food as an exposure with outcomes.
 
     Returns the list of created symptom ids.
     """
+    await _seed_kb_food(food)
     now = datetime.now(timezone.utc)
-    meal_resp = await client.post(
-        "/api/v1/meals",
-        json={
-            "timestamp": (now - timedelta(hours=2)).isoformat(),
-            "raw_description": f"{food} plate",
-            "meal_type": "lunch",
-        },
-    )
-    assert meal_resp.status_code == 201
-    meal_id = meal_resp.json()["id"]
-    await client.post(f"/api/v1/meals/{meal_id}/items", json={"items": [{"name": food}]})
 
     symptom_ids: list[str] = []
     for i in range(n_symptoms):
+        # Distinct calendar day per episode: meal at 09:00, symptom at 14:00 same day.
+        day = (now - timedelta(days=i)).replace(hour=9, minute=0, second=0, microsecond=0)
+        meal_resp = await client.post(
+            "/api/v1/meals",
+            json={
+                "timestamp": day.isoformat(),
+                "raw_description": f"{food} plate",
+                "meal_type": "lunch",
+            },
+        )
+        assert meal_resp.status_code == 201
+        meal_id = meal_resp.json()["id"]
+        await client.post(f"/api/v1/meals/{meal_id}/items", json={"items": [{"name": food}]})
+
         resp = await client.post(
             "/api/v1/symptoms",
             json={
-                "timestamp": (now - timedelta(minutes=30 * i)).isoformat(),
+                "timestamp": day.replace(hour=14).isoformat(),
                 "symptom_type": "bloating",
                 "vas_score": 70,
             },
@@ -125,7 +164,7 @@ async def test_suspect_foods_upgraded_fields():
         foods = resp.json()["foods"]
         row = next(f for f in foods if f["food_name"] == UNIQUE_FOOD)
 
-        # Every required Box-8 field present
+        # Every required Box-8 field present (now versioned + hierarchical Bayes + hybrid)
         for key in (
             "trigger_score",
             "combined_score",
@@ -135,18 +174,27 @@ async def test_suspect_foods_upgraded_fields():
             "n_symptom_episodes",
             "confidence_label",
             "confidence_tier",
+            "method",
+            "trigger_probability",
+            "assoc_p_value",
+            "assoc_agreement",
         ):
             assert key in row, f"missing {key}"
 
         assert row["n_symptom_episodes"] == 3
-        assert row["n_meals"] == 1
-        assert row["trigger_score"] == 100.0
+        assert row["n_meals"] == 3  # one meal per exposed day
+        # Versioned hierarchical-Bayes contract
+        assert row["method"] == "hierarchical_bayes_logistic"
+        assert 0.0 <= row["trigger_probability"] <= 1.0
+        # Hierarchical score (trigger_probability * 100), no longer a raw proportion
+        assert 0.0 < row["trigger_score"] <= 100.0
+        assert abs(row["trigger_score"] - row["trigger_probability"] * 100.0) < 0.5
         # No medication logged -> combined score equals the raw trigger score
         assert row["combined_score"] == row["trigger_score"]
         assert row["medication_confounded"] is False
-        # 95% CI is a proper sub-interval of the 0–100 scale
-        assert 0.0 <= row["ci_low"] < row["ci_high"] <= 100.0
-        assert row["ci_low"] <= row["trigger_score"] <= row["ci_high"]
+        # 95% credible interval is on the odds-ratio scale: strictly positive, proper
+        assert 0.0 < row["ci_low"] < row["ci_high"]
+        # n=3 episodes -> "Emerging signal" (below the >=5-episode "Strong" tier)
         assert row["confidence_label"] == "Emerging signal"
 
 

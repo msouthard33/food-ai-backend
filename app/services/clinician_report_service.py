@@ -341,8 +341,9 @@ def render_clinician_pdf(data: dict) -> bytes:
         story.append(Spacer(1, 0.05 * inch))
         story.append(
             Paragraph(
-                "Score is a medication-adjusted association strength (0-100). "
-                "The 95% Wilson confidence interval and the n-of-meals / "
+                "Score is a medication-adjusted association strength (0-100) from a "
+                "hierarchical Bayesian model. The 95% interval shown is the driving "
+                "component's odds-ratio credible interval, and the n-of-meals / "
                 "n-of-symptom-episode sample sizes are shown so weak signals are not "
                 "over-read. Association is not causation; foods here warrant clinical "
                 "correlation, not automatic elimination.",
@@ -410,10 +411,13 @@ def render_clinician_pdf(data: dict) -> bytes:
     story.append(Paragraph("5. Methodology &amp; Important Caveats", st["heading"]))
     story.append(
         Paragraph(
-            "Suspect-food scores are computed from temporal association between logged "
-            "meals and symptom episodes within a 72-hour lag window, adjusted for "
-            "co-logged medication as a confounder. Confidence labels reflect statistical "
-            "strength (sample size and interval width), not the point score alone.",
+            "Suspect-food scores are computed by a hierarchical Bayesian logistic model "
+            "that jointly de-confounds co-occurring food components over a "
+            "condition-appropriate symptom-onset lag window, adjusted for co-logged "
+            "medication as a confounder, and cross-checked against a classical "
+            "association test (chi-square / Fisher's exact with Benjamini-Hochberg FDR). "
+            "Confidence labels reflect statistical strength (sample size and interval "
+            "width), not the point score alone.",
             st["small"],
         )
     )
