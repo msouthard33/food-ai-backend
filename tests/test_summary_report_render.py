@@ -27,14 +27,21 @@ import pytest
 from app.services import summary_report_service as srs
 from app.services import summary_signal as ss
 from app.services.summary_report_service import (
+    _CAVEAT_BY_REASON,
     _CAVEAT_DISAGREE,
     _CAVEAT_GENERIC,
     _CAVEAT_MIXED,
     _CAVEAT_SMALL_SAMPLE,
     _GROUP_HEADING,
+    _demoted_caveat,
     _signal_section,
 )
-from app.services.summary_signal import SummarySignalRow, _demotion
+from app.services.summary_signal import (
+    DEMOTION_REASON_CODES,
+    DemotionReason,
+    SummarySignalRow,
+    _demotion,
+)
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────────
@@ -236,6 +243,77 @@ def test_protective_strong_never_a_confirmed_trigger():
     assert _GROUP_HEADING["protective"] in paragraphs
     assert any(cav in full for cav in _ALL_CAVEATS)
     assert "Worth discussing" not in full
+
+
+# ── 3b. OQ-4: exact-code caveat mapping, every code reachable, no silent fallthrough ──
+
+#: The intended §5.4 caveat for each canonical code (the contract the renderer honors).
+_EXPECTED_CAVEAT = {
+    DemotionReason.INSUFFICIENT_SAMPLE: _CAVEAT_SMALL_SAMPLE,
+    DemotionReason.BELOW_THRESHOLD: _CAVEAT_SMALL_SAMPLE,
+    DemotionReason.GUARDRAIL_DISAGREES: _CAVEAT_DISAGREE,
+    DemotionReason.INCONCLUSIVE: _CAVEAT_MIXED,
+    DemotionReason.PROTECTIVE: _CAVEAT_GENERIC,
+}
+
+
+def test_expected_caveat_table_covers_every_canonical_code():
+    # the test's own expectation table must enumerate the whole enum — so adding a
+    # DemotionReason without updating this file fails here, not silently downstream.
+    assert {r.value for r in _EXPECTED_CAVEAT} == set(DEMOTION_REASON_CODES)
+
+
+@pytest.mark.parametrize("reason", list(DemotionReason))
+def test_every_canonical_code_maps_to_its_specific_caveat(reason):
+    # exact-code mapping (OQ-4): each canonical code resolves to its approved §5.4
+    # string. This is what makes the previously-unreachable DISAGREE caveat reachable.
+    assert _demoted_caveat(reason.value) == _EXPECTED_CAVEAT[reason]
+
+
+def test_disagree_caveat_is_now_reachable():
+    # the exact bug OQ-4 names: no seam reason used to reach _CAVEAT_DISAGREE. The
+    # canonical guardrail-disagreement code now resolves to it by exact match.
+    assert _demoted_caveat(DemotionReason.GUARDRAIL_DISAGREES.value) == _CAVEAT_DISAGREE
+
+
+def test_all_four_caveats_are_reachable_from_some_code():
+    reached = {_demoted_caveat(code) for code in DEMOTION_REASON_CODES}
+    for caveat in (_CAVEAT_SMALL_SAMPLE, _CAVEAT_DISAGREE, _CAVEAT_MIXED, _CAVEAT_GENERIC):
+        assert caveat in reached, f"caveat unreachable from any canonical code: {caveat!r}"
+
+
+def test_none_reason_takes_the_generic_hedge():
+    assert _demoted_caveat(None) == _CAVEAT_GENERIC
+
+
+def test_unmapped_code_raises_instead_of_silent_generic():
+    # mutation guard: a code the seam can't emit (typo / stale rename) must NOT quietly
+    # degrade to the generic caveat — it must blow up so the drift is caught.
+    with pytest.raises(ValueError):
+        _demoted_caveat("association test disagrees")  # the OLD prose, now a non-code
+    with pytest.raises(ValueError):
+        _demoted_caveat("not_a_real_demotion_code")
+
+
+def test_renderer_caveat_map_matches_seam_code_set_exactly():
+    # the renderer must cover EXACTLY the seam's canonical code set — no missing code
+    # (would raise at runtime) and no extra key (a caveat for a code that can't occur).
+    assert set(_CAVEAT_BY_REASON) == set(DEMOTION_REASON_CODES)
+
+
+def test_seam_emits_only_canonical_codes_across_the_whole_matrix():
+    # every (direction, confidence) the seam can produce yields either None or a code
+    # the renderer knows — proving emit-side and map-side share one vocabulary.
+    for direction, confidence in product(_DIRECTIONS, _CONFIDENCES):
+        _, reason = _demotion(direction, confidence)
+        assert reason is None or reason in DEMOTION_REASON_CODES, (direction, confidence, reason)
+
+
+def test_demotion_reason_codes_are_bare_codes_not_prose():
+    # the stored reason is a machine code, not patient-facing prose (that lives only in
+    # the renderer's caveat strings). Guards against a regression to sentence reasons.
+    for code in DEMOTION_REASON_CODES:
+        assert " " not in code and code == code.lower()
 
 
 def test_empty_signal_list_renders_warm_no_dead_end():

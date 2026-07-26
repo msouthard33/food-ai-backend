@@ -28,6 +28,7 @@ import math
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,6 +49,41 @@ _Z_95 = 1.96
 _ADEQUATE_EXPOSED = 5
 _ADEQUATE_CONTROL = 5
 _ADEQUATE_SYMPTOM_DAYS = 5
+
+
+# ── Canonical demotion vocabulary (the ONE source of truth) ────────────────────
+
+class DemotionReason(str, Enum):
+    """Canonical, engine-agnostic codes for ``SummarySignalRow.demotion_reason``.
+
+    This enum is the SINGLE source of truth for the demotion vocabulary (see the
+    signal contract doc, §demotion). The provider seam emits ONLY these exact codes,
+    and the report renderer maps EACH one to a §5.4 caveat by EXACT match — never by
+    substring (OQ-4). Adding a member here is a deliberate contract change: the
+    renderer's caveat map (and its coverage test) fail loudly until the new code is
+    given a caveat, so a reason can never silently fall through to the generic hedge.
+
+    The stored value is a plain lowercase code, NOT patient-facing prose — the human
+    wording lives entirely in the renderer's §5.4 caveat strings.
+    """
+
+    #: odds-ratio CI lies entirely below 1.0 — protective, not a trigger.
+    PROTECTIVE = "protective_association"
+    #: odds-ratio CI straddles 1.0 — direction not established.
+    INCONCLUSIVE = "inconclusive_direction"
+    #: too few exposed/control days to test the association (degenerate/skipped test).
+    INSUFFICIENT_SAMPLE = "insufficient_sample"
+    #: testable but below the significance/sample threshold — preliminary only.
+    BELOW_THRESHOLD = "below_threshold"
+    #: reserved for the rewired engine: the classical guardrail actively DISAGREES with
+    #: the engine's signal, so it is held back from a stronger reading. Not emitted by
+    #: the interim seam yet, but part of the stable contract so the caveat is reachable.
+    GUARDRAIL_DISAGREES = "guardrail_disagrees"
+
+
+#: Frozen registry of every valid ``demotion_reason`` code, for exhaustive
+#: render-side coverage checks. The renderer's caveat map must cover exactly this set.
+DEMOTION_REASON_CODES: frozenset[str] = frozenset(r.value for r in DemotionReason)
 
 
 # ── The stable contract row ────────────────────────────────────────────────────
@@ -72,7 +108,7 @@ class SummarySignalRow:
 
     # honesty flag: True when the signal is shown but must be downweighted
     demoted: bool
-    demotion_reason: str | None
+    demotion_reason: str | None   # a canonical ``DemotionReason`` code (or None)
 
     # sample-size transparency (always shown alongside the signal)
     exposed_count: int
@@ -150,22 +186,24 @@ def _confidence_tier(
 
 
 def _demotion(direction: str, confidence: str) -> tuple[bool, str | None]:
-    """Honesty flag: is this row shown but downweighted, and why.
+    """Honesty flag: is this row shown but downweighted, and the canonical reason code.
 
     A row is a confirmed-trigger headline ONLY when its direction is ``trigger`` AND
     its confidence is ``strong`` or ``moderate``. Everything else is demoted so the
-    report never implies a trigger the evidence does not support.
+    report never implies a trigger the evidence does not support. The reason is a
+    ``DemotionReason`` code (never patient-facing prose); the renderer turns the code
+    into the approved §5.4 caveat by exact match.
     """
     if direction == "trigger" and confidence in ("strong", "moderate"):
         return False, None
     if direction == "protective":
-        return True, "protective association (odds ratio below 1) — not a trigger signal"
+        return True, DemotionReason.PROTECTIVE.value
     if direction == "inconclusive":
-        return True, "confidence interval spans 1.0 — direction not established"
+        return True, DemotionReason.INCONCLUSIVE.value
     # direction == "trigger" but confidence preliminary/insufficient
     if confidence == "insufficient":
-        return True, "insufficient exposed/control days to test this association"
-    return True, "below the significance/sample threshold — preliminary only"
+        return True, DemotionReason.INSUFFICIENT_SAMPLE.value
+    return True, DemotionReason.BELOW_THRESHOLD.value
 
 
 def derive_signal_row(food_name: str, guard: GuardrailResult) -> SummarySignalRow:

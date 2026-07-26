@@ -33,7 +33,12 @@ from app.services.clinician_report_service import (
     _table,
     build_clinician_report_data,
 )
-from app.services.summary_signal import SummarySignalRow, build_summary_signal_rows
+from app.services.summary_signal import (
+    DEMOTION_REASON_CODES,
+    DemotionReason,
+    SummarySignalRow,
+    build_summary_signal_rows,
+)
 
 # ── §5 canonical copy tables (W2_summary_report_layout.md — TONE GATE CLOSED
 #    2026-07-26). The grouped definition-list is CANONICAL over the deprecated
@@ -93,7 +98,7 @@ _INCONCLUSIVE_READOUT = (
     "clearly line up <i>with</i> or <i>against</i> your symptoms in this window."
 )
 
-#: §5.4 demoted-caveat strings, selected by substring of `demotion_reason`.
+#: §5.4 demoted-caveat strings, selected by EXACT ``demotion_reason`` code (OQ-4).
 #: Plain-language only; never names the guardrail test, FDR, p-value, or the engine.
 _CAVEAT_SMALL_SAMPLE = (
     "We're showing this for completeness, but it's based on very few logs — "
@@ -119,6 +124,40 @@ _EMPTY_STATE = (
     "meals and {symptom_entries} symptom entries so far are already building the "
     "picture. Keep logging what you can, and this section fills in."
 )
+
+#: §5.4 caveat map — EXACT ``demotion_reason`` code -> approved caveat string (OQ-4).
+#: Keyed by the canonical ``DemotionReason`` codes (the ONE source of truth in the
+#: seam), so a demoted row's caveat is chosen by exact match, never substring. Every
+#: code maps to one of the four approved §5.4 strings; ``PROTECTIVE`` (and a bare
+#: ``None``) intentionally take the generic hedge, since the spec defines no
+#: protective-specific caveat.
+_CAVEAT_BY_REASON: dict[str, str] = {
+    DemotionReason.INSUFFICIENT_SAMPLE.value: _CAVEAT_SMALL_SAMPLE,
+    DemotionReason.BELOW_THRESHOLD.value: _CAVEAT_SMALL_SAMPLE,
+    DemotionReason.GUARDRAIL_DISAGREES.value: _CAVEAT_DISAGREE,
+    DemotionReason.INCONCLUSIVE.value: _CAVEAT_MIXED,
+    DemotionReason.PROTECTIVE.value: _CAVEAT_GENERIC,
+}
+
+
+def _validate_caveat_map() -> None:
+    """Fail loudly at import if the caveat map drifts out of sync with the seam.
+
+    Every canonical ``DemotionReason`` code MUST have an explicit caveat and no caveat
+    may key off a code the seam can't emit. This is the import-time half of OQ-4's
+    guard (the test suite asserts the same invariant); together they make it impossible
+    for a renamed/added code to silently fall through to the generic hedge.
+    """
+    missing = set(DEMOTION_REASON_CODES) - set(_CAVEAT_BY_REASON)
+    unknown = set(_CAVEAT_BY_REASON) - set(DEMOTION_REASON_CODES)
+    if missing or unknown:
+        raise RuntimeError(
+            "§5.4 caveat map out of sync with DemotionReason "
+            f"(missing caveats for {missing}; unknown codes {unknown})"
+        )
+
+
+_validate_caveat_map()
 
 #: ordinal confidence rank for within-group sort (never a numeric-score sort).
 _CONF_RANK = {"strong": 0, "moderate": 1, "preliminary": 2, "insufficient": 3}
@@ -151,15 +190,24 @@ def _sample_size_line(r: SummarySignalRow) -> str:
 
 
 def _demoted_caveat(reason: str | None) -> str:
-    """§5.4 caveat string selected by substring of ``demotion_reason`` (OQ-4)."""
-    text = (reason or "").lower()
-    if "small sample" in text or "threshold" in text or "insufficient" in text:
-        return _CAVEAT_SMALL_SAMPLE
-    if "association test disagrees" in text or "guardrail" in text or "check" in text:
-        return _CAVEAT_DISAGREE
-    if "direction conflicts" in text or "effect size" in text or "spans 1" in text:
-        return _CAVEAT_MIXED
-    return _CAVEAT_GENERIC
+    """§5.4 caveat for a demoted row, by EXACT ``demotion_reason`` code (OQ-4 closed).
+
+    The code is a canonical ``summary_signal.DemotionReason`` value, matched exactly —
+    never by substring — so every code (including ``guardrail_disagrees`` -> the
+    "check-tests disagree" caveat, previously unreachable) resolves to its approved
+    §5.4 string. ``None`` (no specific reason) takes the generic hedge; any non-None
+    code that is NOT in the canonical set raises rather than silently degrading to the
+    generic caveat, so a drifted/renamed code is caught instead of hidden.
+    """
+    if reason is None:
+        return _CAVEAT_GENERIC
+    try:
+        return _CAVEAT_BY_REASON[reason]
+    except KeyError:
+        raise ValueError(
+            f"unmapped demotion_reason code {reason!r}; every code in "
+            "summary_signal.DemotionReason must have a §5.4 caveat"
+        ) from None
 
 
 def _supporting_detail_line(r: SummarySignalRow) -> str | None:

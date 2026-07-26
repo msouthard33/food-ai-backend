@@ -18,6 +18,7 @@ from app.models.enums import ComponentType
 from app.services import summary_report_service
 from app.services.assoc_guardrail import GuardrailResult
 from app.services.summary_signal import (
+    DemotionReason,
     SummarySignalRow,
     derive_signal_row,
     odds_ratio_ci,
@@ -107,7 +108,8 @@ def test_testable_not_significant_is_preliminary_and_demoted():
 def test_protective_food_is_always_demoted():
     row = derive_signal_row("Rice", _guard(5, 25, 20, 10, significant=True, p_value=0.001))
     assert row.demoted is True
-    assert row.demotion_reason and "protective" in row.demotion_reason.lower()
+    # the reason is the canonical code, not free-text prose (OQ-4)
+    assert row.demotion_reason == DemotionReason.PROTECTIVE.value
 
 
 def test_sample_counts_come_from_the_2x2_margins():
