@@ -136,10 +136,19 @@ def test_wilson_interval_bounds():
 def test_evidence_confidence_label():
     from app.utils.confidence import evidence_confidence_label
 
-    assert evidence_confidence_label(5, 20.0) == "Strong signal"
-    assert evidence_confidence_label(5, 30.0) == "Emerging signal"  # interval too wide
-    assert evidence_confidence_label(3, 50.0) == "Emerging signal"
-    assert evidence_confidence_label(2, 10.0) == "Preliminary"
+    # Signature is (n_episodes, ci_low, ci_high) on the ODDS-RATIO scale.
+    # Strong: >=5 episodes, interval entirely above 1.0, tight (<=10x ratio).
+    assert evidence_confidence_label(5, 1.5, 6.0) == "Strong signal"
+    # Elevated but interval too wide (25x) -> demoted to Emerging.
+    assert evidence_confidence_label(5, 1.2, 30.0) == "Emerging signal"
+    # >=3 episodes, trigger-consistent (ci_high > 1) -> Emerging.
+    assert evidence_confidence_label(3, 0.9, 20.0) == "Emerging signal"
+    # Too few episodes -> Preliminary regardless of a tight elevated interval.
+    assert evidence_confidence_label(2, 1.5, 6.0) == "Preliminary"
+    # Direction gate: interval entirely at/below OR=1 is protective -> never a signal,
+    # even with a large sample and a tight interval (the Garlic honesty case).
+    assert evidence_confidence_label(10, 0.15, 0.82) == "Preliminary"
+    assert evidence_confidence_label(20, 0.30, 1.00) == "Preliminary"
 
 
 def test_medication_adjusted_score():

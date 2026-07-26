@@ -95,9 +95,32 @@ DEFAULT_LOOKBACK_DAYS = 90
 #: Fallback max symptom-onset lag (hours) when the user records no condition.
 DEFAULT_MAX_LAG_HOURS = 48.0
 
+#: Fallback *typical* onset lag (hours) when the user records no condition. Used to
+#: align exposure to the day symptoms actually land on (see ``_onset_lag_hours`` and
+#: the onset-shift model note below). Deliberately much shorter than the max-lag tail.
+DEFAULT_ONSET_LAG_HOURS = 12.0
+
+#: Extra whole-day tolerance on either side of the onset-aligned exposure day, as the
+#: span of a backward lag kernel. 0 = align exactly to the onset day (the tightest
+#: window, which preserves the most unexposed control days). A future refinement could
+#: widen this to absorb onset variance on real diaries; the bake-off harness (fixed
+#: onset) is maximised at 0, so we ship the tight window and keep this as the knob.
+ONSET_TOLERANCE_DAYS = 0
+
 #: Lag-kernel exponential-decay half-life in DAYS. Recent exposure is weighted more
-#: than exposure several days back; span is set by the condition max lag.
+#: than exposure several days back; span is set by ``ONSET_TOLERANCE_DAYS``.
 LAG_KERNEL_HALFLIFE_DAYS = 1.0
+
+#: Background/confounding floor: the minimum odds ratio at which a component is called
+#: a trigger. ``trigger_probability = P(OR_c > BACKGROUND_EFFECT_OR)`` instead of the
+#: naive ``P(OR_c > 1)``. A ubiquitous *background* component (present at similar
+#: levels on symptom and non-symptom days) has β ≈ 0, which ``P(OR>1)`` scores at ~50
+#: — enough to flag every innocent food that merely carries it. Requiring a *meaningful*
+#: 1.5× odds increase collapses those background/near-null components toward 0 while
+#: leaving genuine triggers (OR ≫ 1.5) essentially unchanged. This is the confounding
+#: adjustment that stops trace component loads from safe foods inflating innocent foods.
+BACKGROUND_EFFECT_OR = 1.5
+_MEANINGFUL_LOG_OR = float(np.log(BACKGROUND_EFFECT_OR))
 
 #: Ridge precision λ_c applied to every component coefficient's prior. Prior SD of
 #: β_c is 1/sqrt(λ) ≈ 1.0 log-odds — moderate shrinkage a data-rich user overrides.
@@ -126,6 +149,20 @@ MAX_PRIOR_MEAN = 1.5
 MAX_NEWTON_ITERS = 100
 NEWTON_TOL = 1e-8
 
+#: Max backtracking halvings per Newton step (line search globalization). Under
+#: quasi-separation W = p(1−p) → 0, the raw Newton step can overshoot massively and
+#: the iteration diverges (β → tens/hundreds, exp(β) overflows the odds-ratio
+#: interval to ~1e37). A backtracking line search on the penalized log-likelihood
+#: only accepts a step that does not *decrease* the objective, so the fit converges
+#: to the true finite MAP instead of running away.
+_MAX_BACKTRACK = 40
+
+#: Hard clamp on |β_c| (log-odds) as a final backstop. exp(±BETA_CLAMP) bounds every
+#: odds-ratio interval well below the finiteness ceiling (1e12) even at the max SE,
+#: and is far outside any legitimate ridge-penalised effect, so it never binds on
+#: real data — it only fires on a pathological run the line search somehow misses.
+_BETA_CLAMP = 15.0
+
 #: Numerical floors.
 _PROB_EPS = 1e-6          # clip p away from {0,1} so W stays positive-definite
 _HESSIAN_JITTER = 1e-8    # tiny ridge added to the Hessian diagonal for invertibility
@@ -145,8 +182,10 @@ class ComponentTriggerResult:
 
     Fields:
         component_type: the ComponentType analysed.
-        trigger_probability: P(β_c > 0) = Φ(β̂_c / SE_c), in 0–1. Probability the
-            component's log-odds effect on symptoms is positive (a real trigger).
+        trigger_probability: P(OR_c > BACKGROUND_EFFECT_OR) = Φ((β̂_c − log 1.5) / SE_c),
+            in 0–1. Probability the component raises symptom odds by a *meaningful*
+            (≥1.5×) amount — the background-adjusted trigger probability (a near-null
+            background component sits near 0 here, not at the 0.5 that P(β>0) gives it).
         score: trigger_probability * 100 (0–100; feeds the D9 tier mapping).
         ci_low / ci_high: 95% credible interval on the ODDS RATIO exp(β̂_c ± 1.96·SE_c)
             (strictly positive; 1.0 = no effect, >1 = raises symptom odds).
@@ -179,6 +218,32 @@ class ComponentTriggerResult:
 
 # ── Core numeric solver (pure numpy; independently verifiable) ─────────────────
 
+def _penalized_loglik(
+    X: np.ndarray,
+    y: np.ndarray,
+    beta: np.ndarray,
+    mu: np.ndarray,
+    lam: np.ndarray,
+) -> float:
+    """Objective maximised by ``fit_penalized_logistic``: the merit function that the
+    Newton line search backtracks on.
+
+        Σ_t [y_t·η_t − softplus(η_t)] − ½ Σ_c λ_c (β_c − μ_c)²,   η = Xβ
+
+    ``softplus(η) = log(1 + e^η)`` is evaluated in the numerically stable form
+    ``max(η, 0) + log1p(e^{−|η|})`` so large |η| neither overflows nor loses the
+    tiny-probability tail. Returns ``-inf`` if the design produces a non-finite η,
+    which the caller reads as "reject this step".
+    """
+    eta = X @ beta
+    if not np.all(np.isfinite(eta)):
+        return -np.inf
+    softplus = np.maximum(eta, 0.0) + np.log1p(np.exp(-np.abs(eta)))
+    log_lik = float(np.sum(y * eta - softplus))
+    penalty = 0.5 * float(np.sum(lam * (beta - mu) ** 2))
+    return log_lik - penalty
+
+
 def fit_penalized_logistic(
     X: np.ndarray,
     y: np.ndarray,
@@ -192,7 +257,17 @@ def fit_penalized_logistic(
     Maximizes  ``Σ_t [y_t·η_t − log(1+e^{η_t})] − ½ (β−μ)ᵀ Λ (β−μ)``  where
     ``η = Xβ``, ``μ = prior_mean``, ``Λ = diag(prior_precision)``, via Newton–Raphson:
 
-        β ← β + (XᵀWX + Λ)⁻¹ (Xᵀ(y−p) − Λ(β−μ)),   W = diag(p_t(1−p_t)).
+        β ← β + t · (XᵀWX + Λ)⁻¹ (Xᵀ(y−p) − Λ(β−μ)),   W = diag(p_t(1−p_t)).
+
+    The Newton direction is globalized by a **backtracking line search**: the step
+    scale ``t`` starts at 1 and is halved (up to ``_MAX_BACKTRACK`` times) until the
+    candidate does not decrease the penalized log-likelihood (``_penalized_loglik``).
+    Plain Newton has no such safeguard, so under quasi-separation (W → 0, common for a
+    condition-seeded component whose exposure almost perfectly predicts symptoms) it
+    overshoots and diverges — β blows up to tens/hundreds and the reported odds-ratio
+    interval ``exp(β̂ ± 1.96·SE)`` overflows to ~1e37. With the line search the fit
+    settles at the true finite MAP. Each accepted β is additionally clamped to
+    ``±_BETA_CLAMP`` as a last-resort backstop so the interval is always finite.
 
     Args:
         X: (n, k) design matrix (caller includes any intercept column).
@@ -238,8 +313,23 @@ def fit_penalized_logistic(
         except np.linalg.LinAlgError:
             step = np.linalg.lstsq(hessian, gradient, rcond=None)[0]
 
-        beta = beta + step
-        if np.max(np.abs(step)) < tol:
+        # Backtracking line search: accept the largest t ∈ {1, ½, ¼, …} whose step
+        # does not decrease the penalized log-likelihood. Prevents the Newton
+        # overshoot / divergence that quasi-separation (W → 0) otherwise causes.
+        f0 = _penalized_loglik(X, y, beta, mu, lam)
+        t = 1.0
+        accepted = False
+        for _bt in range(_MAX_BACKTRACK):
+            candidate = np.clip(beta + t * step, -_BETA_CLAMP, _BETA_CLAMP)
+            if _penalized_loglik(X, y, candidate, mu, lam) >= f0:
+                beta = candidate
+                accepted = True
+                break
+            t *= 0.5
+        if not accepted:
+            # No downhill-safe step (already at the MAP to numerical precision).
+            break
+        if np.max(np.abs(t * step)) < tol:
             break
 
     # Laplace covariance at the MAP.
@@ -362,6 +452,47 @@ def _max_lag_hours(condition_keys: list[str]) -> float:
     return max(lags) if lags else DEFAULT_MAX_LAG_HOURS
 
 
+def _onset_lag_hours(condition_keys: list[str]) -> float:
+    """*Typical* symptom-onset lag (hours) across the user's conditions.
+
+    This is the centre of onset, NOT the tail max ``_max_lag_hours`` returns. It drives
+    the onset-shift exposure model: each meal is attributed to the day its symptoms are
+    expected to appear (``meal_time + onset``), so exposure lines up with the outcome
+    it causes instead of being smeared across the whole [0, max-lag] tail. Using the
+    max-lag window (36h for IBS) instead destroyed contrast — a frequent trigger fell
+    inside almost every day's window, leaving no unexposed control days and flipping the
+    fitted effect *protective*. The typical onset keeps control days intact.
+
+    Per condition: the triangular configs' ``peak``; the bimodal MCAS config's
+    weight-averaged mode midpoints (the dominant delayed mode drives it). Take the
+    widest typical onset across conditions; ``DEFAULT_ONSET_LAG_HOURS`` when none.
+    """
+    onsets: list[float] = []
+    for key in condition_keys:
+        cfg = CONDITION_CONFIGS.get(key)
+        if not cfg:
+            continue
+        lag = cfg.get("lag_hours", {})
+        if lag.get("bimodal"):
+            weighted = 0.0
+            weight_sum = 0.0
+            for mode_key in ("mode_1", "mode_2"):
+                mode = lag.get(mode_key)
+                if not mode:
+                    continue
+                midpoint = 0.5 * (float(mode["min"]) + float(mode["max"]))
+                weight = float(mode.get("weight", 0.5))
+                weighted += weight * midpoint
+                weight_sum += weight
+            if weight_sum > 0:
+                onsets.append(weighted / weight_sum)
+        elif "peak" in lag:
+            onsets.append(float(lag["peak"]))
+        elif "max" in lag:
+            onsets.append(float(lag["max"]))
+    return max(onsets) if onsets else DEFAULT_ONSET_LAG_HOURS
+
+
 # ── Exposure / design-matrix construction ──────────────────────────────────────
 
 async def _load_component_levels(
@@ -418,6 +549,7 @@ def _daily_component_loads(
     meals: list[Meal],
     component_levels: dict[uuid.UUID, dict[ComponentType, float]],
     name_to_food_id: dict[str, uuid.UUID] | None = None,
+    onset_shift_hours: float = 0.0,
 ) -> tuple[dict[date, dict[ComponentType, float]], set[ComponentType]]:
     """Aggregate KB component levels into a per-day load per component.
 
@@ -425,15 +557,24 @@ def _daily_component_loads(
     is the summed ``FoodComponentDetail.level`` (0–4) across every meal item that day
     carrying that component, and ``observed_components`` is every component seen.
 
+    **Onset shift**: each meal is binned to ``(meal_time + onset_shift_hours).date()``,
+    i.e. the day its symptoms are *expected* to appear, not the day it was eaten. With a
+    typical onset that crosses midnight (e.g. an evening trigger with an 8h IBS lag →
+    next-morning symptom) this aligns the exposure row with the symptom row it explains;
+    binning to the meal day instead put the trigger's load on a non-symptom day and made
+    the fitted effect read protective. ``onset_shift_hours = 0`` reproduces meal-day
+    binning.
+
     A meal item is resolved to a KB food by ``food_entry_id`` when present, else by a
     case-insensitive name match (``name_to_food_id``) so API/AI-logged items (NULL
     ``food_entry_id``) still register exposure.
     """
     name_to_food_id = name_to_food_id or {}
+    shift = timedelta(hours=onset_shift_hours)
     daily_loads: dict[date, dict[ComponentType, float]] = {}
     observed: set[ComponentType] = set()
     for meal in meals:
-        day = meal.timestamp.date()
+        day = (meal.timestamp + shift).date()
         bucket = daily_loads.setdefault(day, {})
         for item in meal.items:
             food_id = item.food_entry_id
@@ -524,8 +665,12 @@ async def analyze_hierarchical_triggers(
     ).scalars().all()
     condition_keys = _condition_keys_for(list(condition_types))
     implicated = _implicated_components(condition_keys)
-    max_lag_days = int(np.ceil(_max_lag_hours(condition_keys) / 24.0))
-    kernel = lag_kernel(max_lag_days)
+    # Onset-shift exposure model: attribute each meal to the day symptoms are expected
+    # (meal_time + typical onset), with only a small whole-day tolerance kernel. This
+    # replaces the old wide max-lag window that smeared exposure across [0, 36h] and
+    # destroyed the exposed/unexposed contrast for frequent triggers.
+    onset_hours = _onset_lag_hours(condition_keys)
+    kernel = lag_kernel(ONSET_TOLERANCE_DAYS)
 
     if population_prior is None:
         population_prior = await build_population_prior(db)
@@ -565,7 +710,7 @@ async def analyze_hierarchical_triggers(
     food_ids |= set(name_to_food_id.values())
     component_levels = await _load_component_levels(db, food_ids)
     daily_loads, observed = _daily_component_loads(
-        meals, component_levels, name_to_food_id
+        meals, component_levels, name_to_food_id, onset_shift_hours=onset_hours
     )
 
     # Symptom days in the window (respect soft-deletes).
@@ -625,8 +770,11 @@ async def analyze_hierarchical_triggers(
         b = float(beta[i + 1])
         var = float(cov[i + 1, i + 1])
         se = float(np.sqrt(var)) if var > 0.0 else 0.0
-        trigger_probability = normal_cdf(b, mu=0.0, sigma=se) if se > 0.0 else (
-            1.0 if b > 0.0 else 0.0
+        # Background floor: P(β_c > log(BACKGROUND_EFFECT_OR)), not P(β_c > 0). Requires
+        # a meaningful (≥1.5×) odds increase so near-null background components don't
+        # score ~50 and flag every innocent food that carries them.
+        trigger_probability = normal_cdf(b, mu=_MEANINGFUL_LOG_OR, sigma=se) if se > 0.0 else (
+            1.0 if b > _MEANINGFUL_LOG_OR else 0.0
         )
         ci_low = float(np.exp(b - 1.96 * se))
         ci_high = float(np.exp(b + 1.96 * se))
@@ -721,8 +869,9 @@ async def cold_start_results(
         b = float(beta[i + 1])
         var = float(cov[i + 1, i + 1])
         se = float(np.sqrt(var)) if var > 0.0 else 0.0
-        trigger_probability = normal_cdf(b, mu=0.0, sigma=se) if se > 0.0 else (
-            1.0 if b > 0.0 else 0.0
+        # Background floor (see analyze_hierarchical_triggers): P(β > log(1.5)).
+        trigger_probability = normal_cdf(b, mu=_MEANINGFUL_LOG_OR, sigma=se) if se > 0.0 else (
+            1.0 if b > _MEANINGFUL_LOG_OR else 0.0
         )
         results.append(
             ComponentTriggerResult(

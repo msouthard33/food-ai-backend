@@ -211,18 +211,44 @@ def prob_beta_exceeds(
     return max(0.0, min(1.0, result))
 
 
-def evidence_confidence_label(n_symptom_episodes: int, ci_width: float) -> str:
+#: A "Strong signal" needs a reasonably *precise* effect estimate. Precision on the
+#: odds-ratio scale is naturally multiplicative, so we bound the ratio ci_high/ci_low
+#: rather than their difference. 10× means the effect is pinned to within one order of
+#: magnitude — tight for a personal food diary. (Subtracting OR bounds, as the old
+#: code did with a 0–100 threshold, was a units error: an OR-scale width of ~0.7 is
+#: always ≤ 25, so every ≥5-episode food was mislabeled "Strong".)
+STRONG_SIGNAL_MAX_OR_RATIO = 10.0
+
+
+def evidence_confidence_label(
+    n_symptom_episodes: int, ci_low: float, ci_high: float
+) -> str:
     """Plain-English confidence label for a suspect-food signal.
 
-    Grounded in *statistical* strength (sample size + interval width), not the point
-    score — a high score off two data points is not confidence. ``ci_width`` is the
-    95% interval width expressed on the same 0–100 scale as the score.
+    Grounded in *statistical* strength (sample size + effect direction + interval
+    precision), not the point score — a high score off two data points is not
+    confidence. ``ci_low``/``ci_high`` are the 95% credible interval on the **odds
+    ratio** (1.0 = no effect, > 1 = raises symptom odds), exactly as carried on the
+    trigger result.
 
-    - "Strong signal":   >= 5 supporting episodes AND a tight interval (width <= 25)
-    - "Emerging signal": >= 3 supporting episodes
-    - "Preliminary":     everything below that (surfaced, but caveated)
+    Direction gate (honesty): a food whose odds-ratio interval sits **entirely at or
+    below 1.0** is *protective* (or null) — it is not evidence that the food triggers
+    symptoms, so it is never labelled a "signal" regardless of sample size. It falls
+    through to "Preliminary".
+
+    - "Strong signal":   >= 5 episodes AND interval entirely above 1.0 (``ci_low`` > 1)
+                         AND a tight interval (``ci_high / ci_low`` <= 10×).
+    - "Emerging signal": >= 3 episodes AND the interval is trigger-consistent
+                         (``ci_high`` > 1.0, i.e. not protective).
+    - "Preliminary":     everything else (surfaced, but caveated) — including every
+                         protective / non-elevating food.
     """
-    if n_symptom_episodes >= 5 and ci_width <= 25.0:
+    # Direction gate: interval entirely at/below OR = 1 → protective/null → not a signal.
+    if ci_high <= 1.0:
+        return "Preliminary"
+
+    tight = ci_low > 0.0 and (ci_high / ci_low) <= STRONG_SIGNAL_MAX_OR_RATIO
+    if n_symptom_episodes >= 5 and ci_low > 1.0 and tight:
         return "Strong signal"
     if n_symptom_episodes >= 3:
         return "Emerging signal"
