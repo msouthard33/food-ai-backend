@@ -44,6 +44,19 @@ CONDITION_PRIORS: dict[str, list[ComponentType]] = {
 }
 
 
+def _symptom_type_value(symptom_type: object) -> str:
+    """Return the DB enum *value* for a symptom type.
+
+    ``SymptomScore.symptom_type`` is a ``SymptomType`` enum, and the
+    ``trigger_predictions.symptom_types`` column is ``ARRAY(symptom_type_enum)``
+    whose labels are the enum *values* (e.g. ``"bloating"``). ``str(enum)`` yields
+    the qualified name (``"SymptomType.BLOATING"``), which is not a valid enum
+    label and makes the persistence UPDATE fail. Prefer ``.value`` and fall back
+    to ``str`` for plain-string inputs (used by some tests/mocks).
+    """
+    return getattr(symptom_type, "value", None) or str(symptom_type)
+
+
 async def get_user_triggers(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -188,6 +201,16 @@ async def update_trigger_predictions(
         prediction.bayes_ci_high = _safe_decimal(r.ci_high)
         prediction.assoc_p_value = assoc_p
         prediction.assoc_agreement = assoc_agreement
+        # NOTE (H4 merge): the joint hierarchical engine yields per-component
+        # ``ComponentTriggerResult``s only — it does not attribute per-meal
+        # events (meal_id / symptom_id / time_lag). The pre-H4 pipeline's
+        # per-event ``CorrelationEvent`` creation and ``symptom_types`` /
+        # ``average_time_lag_minutes`` accounting (from PR #20) therefore have no
+        # source data in this flow and were dropped as dead code. New rows keep
+        # ``symptom_types=[]`` (empty, not NULL) and leave
+        # ``average_time_lag_minutes`` at its column default. The ``.value``
+        # enum-persistence fix (``_symptom_type_value``) from PR #20 is preserved
+        # everywhere symptom-type enums are actually written elsewhere.
 
         await db.flush()
         updated.append(prediction)

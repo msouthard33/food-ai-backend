@@ -15,18 +15,18 @@ All statements use ``IF NOT EXISTS`` because the prod DB was mis-bootstrapped
 migration idempotent and safe to re-run.
 
 Revision ID: o1d2e3f4a5b6
-Revises: m9b0c1d2e3f4
+Revises: n0c1d2e3f4g5
 Create Date: 2026-07-26
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 
 revision: str = "o1d2e3f4a5b6"
-down_revision: Union[str, None] = "m9b0c1d2e3f4"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "n0c1d2e3f4g5"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 _TABLE = 'public."trigger_predictions"'
 
