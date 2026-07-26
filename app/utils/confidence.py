@@ -39,6 +39,21 @@ def wilson_interval(successes: int, n: int, z: float = 1.96) -> tuple[float, flo
     return (low, high)
 
 
+def normal_cdf(x: float, mu: float = 0.0, sigma: float = 1.0) -> float:
+    """Standard (or general) Normal CDF ``Φ((x - mu) / sigma)`` via ``math.erf``.
+
+    Pure, deterministic, dependency-free. Used by the hierarchical Bayesian trigger
+    engine's Laplace posterior to compute ``P(β_c > 0) = Φ(β̂_c / SE_c)`` — the
+    probability that a component's log-odds effect is positive (i.e. a real trigger).
+
+    ``sigma <= 0`` is degenerate (a point mass at ``mu``): returns 1.0 when
+    ``x >= mu`` else 0.0, matching the limit of the CDF as the SD shrinks to 0.
+    """
+    if sigma <= 0.0:
+        return 1.0 if x >= mu else 0.0
+    return 0.5 * (1.0 + math.erf((x - mu) / (sigma * math.sqrt(2.0))))
+
+
 # ── Beta-Binomial Bayesian math (pure Python, deterministic) ──────────────────
 #
 # Hand-rolled Beta distribution helpers so the Bayesian trigger engine can compute
