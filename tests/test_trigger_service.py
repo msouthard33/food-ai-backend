@@ -245,3 +245,29 @@ def test_extract_preparation_method_does_not_mutate():
     original = "roasted vegetables"
     _ = extract_preparation_method(original)
     assert original == "roasted vegetables"
+
+
+# ── Tests: symptom-type enum → DB value normalisation ─────────────────────────
+
+
+def test_symptom_type_value_from_enum():
+    """A SymptomType enum must serialise to its bare DB value, not 'SymptomType.X'.
+
+    The trigger_predictions.symptom_types column is ARRAY(symptom_type_enum),
+    whose labels are the enum *values*. str(enum) yields the qualified name and
+    makes the persistence UPDATE fail — regression guard.
+    """
+    from app.models.enums import SymptomType
+    from app.services.trigger_service import _symptom_type_value
+
+    assert _symptom_type_value(SymptomType.BLOATING) == "bloating"
+    assert _symptom_type_value(SymptomType.BOWEL_CHANGES) == "bowel_changes"
+    # A value must be a valid enum label (round-trips back to the enum).
+    assert SymptomType(_symptom_type_value(SymptomType.PAIN)) is SymptomType.PAIN
+
+
+def test_symptom_type_value_from_plain_string():
+    """Plain-string inputs (mocks/legacy callers) pass through unchanged."""
+    from app.services.trigger_service import _symptom_type_value
+
+    assert _symptom_type_value("bloating") == "bloating"
