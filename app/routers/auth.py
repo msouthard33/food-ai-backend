@@ -35,11 +35,12 @@ _DEMO_NAMESPACE = uuid.UUID("11111111-2222-4333-8444-555555555555")
 
 # The demo personas. Each maps to the condition string(s) understood by
 # trigger_service.seed_condition_priors / CONDITION_PRIORS.
-Persona = Literal["ibs", "mcas"]
+Persona = Literal["ibs", "mcas", "histamine"]
 
 _PERSONA_CONDITIONS: dict[str, list[str]] = {
     "ibs": ["ibs"],
     "mcas": ["mcas"],
+    "histamine": ["histamine_intolerance"],
 }
 
 
