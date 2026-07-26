@@ -56,6 +56,10 @@ from pathlib import Path
 # Ensure the backend app is importable when run as a script or module.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# Canonical demo identities — shared with the demo-login endpoint so a demo login
+# and this seeded data resolve to the SAME user id + email per persona.
+from app.routers.auth import demo_user_email, demo_user_id  # noqa: E402
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger("seed_demo_account")
 
@@ -92,6 +96,9 @@ class DemoUserSpec:
     """A single hand-tuned demo patient."""
 
     slug: str
+    # Canonical demo persona shared with the demo-login endpoint (app.routers.auth)
+    # so login and seeded data resolve to the SAME user id + email.
+    persona: str
     display_name: str
     conditions: list[str]
     # Ordered [primary, secondary] — recognisable KB food names.
@@ -106,11 +113,13 @@ class DemoUserSpec:
 
     @property
     def email(self) -> str:
-        return f"{self.slug}@foodai.demo"
+        # Shared with the demo-login endpoint so the same account is reused.
+        return demo_user_email(self.persona)
 
     @property
     def user_id(self) -> uuid.UUID:
-        return uuid.uuid5(DEMO_NAMESPACE, self.slug)
+        # Shared with the demo-login endpoint — login and seed hit the SAME user.
+        return demo_user_id(self.persona)
 
 
 # ── The demo cohort ──────────────────────────────────────────────────────────
@@ -119,6 +128,7 @@ class DemoUserSpec:
 DEMO_COHORT: list[DemoUserSpec] = [
     DemoUserSpec(
         slug="demo_ibs",
+        persona="ibs",
         display_name="Demo — IBS (FODMAP)",
         conditions=["ibs"],
         trigger_foods=["Garlic", "Onion"],
@@ -128,6 +138,7 @@ DEMO_COHORT: list[DemoUserSpec] = [
     ),
     DemoUserSpec(
         slug="demo_mcas",
+        persona="mcas",
         display_name="Demo — MCAS (Histamine)",
         conditions=["mcas"],
         trigger_foods=["Cheese (Cheddar)", "Salmon (Smoked)"],
@@ -137,6 +148,7 @@ DEMO_COHORT: list[DemoUserSpec] = [
     ),
     DemoUserSpec(
         slug="demo_histamine",
+        persona="histamine",
         display_name="Demo — Histamine Intolerance",
         conditions=["histamine_intolerance"],
         trigger_foods=["Tuna (Canned)", "Feta Cheese"],
