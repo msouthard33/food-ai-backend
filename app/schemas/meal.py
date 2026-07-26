@@ -4,18 +4,32 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, computed_field
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, computed_field, field_validator
 
 from app.models.enums import ComponentType, MealType, ProcessingStatus
 from app.utils.confidence import confidence_to_tier_label
+from app.utils.timestamps import validate_occurred_at
 
 
 class MealCreate(BaseModel):
+    # occurred-at (when the meal was eaten). Optional: defaults to server "now"
+    # (UTC) when omitted, so existing clients that don't send it keep working.
     timestamp: datetime | None = None
     raw_description: str | None = None
     meal_type: MealType | None = None
+    # Additive capture-precision fields (Wave 2, Pillar 2) — all optional.
+    client_timezone: str | None = None
+    time_precision: Literal["exact", "approximate"] | None = None
 
     model_config = ConfigDict(use_enum_values=True)
+
+    @field_validator("timestamp")
+    @classmethod
+    def _validate_timestamp(cls, v: datetime | None) -> datetime | None:
+        # Reject naive + future occurred-at times; normalise to UTC for storage.
+        return validate_occurred_at(v, "timestamp")
 
 
 class MealItemCreate(BaseModel):
@@ -67,7 +81,10 @@ class MealOut(BaseModel):
     raw_description: str | None = None
     ai_parsed_description: str | None = None
     processing_status: ProcessingStatus
+    client_timezone: str | None = None
+    time_precision: str | None = None
     items: list[MealItemOut] = []
+    # logged-at (server insert time), distinct from `timestamp` (occurred-at).
     created_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True, use_enum_values=True)

@@ -35,7 +35,15 @@ class SymptomScore(Base):
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     meal_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("meals.id", ondelete="SET NULL"))
+    # occurred-at: when the symptom was observed/logged (client-supplied, UTC-normalised).
+    # `created_at` below is the distinct logged-at (server insert) time.
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # onset-at: when the symptom actually *began*, distinct from when it was observed.
+    # Additive/nullable (Wave 2, Pillar 2). Falls back to `timestamp` when omitted.
+    onset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Capture-precision metadata (additive, nullable) — mirrors the meal fields.
+    client_timezone: Mapped[str | None] = mapped_column(String(64))
+    time_precision: Mapped[str | None] = mapped_column(String(16), server_default="exact")
     symptom_type: Mapped[SymptomType] = mapped_column(
         Enum(
             SymptomType,
