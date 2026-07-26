@@ -169,6 +169,113 @@ async def test_suspect_foods_has_confidence_tier(authed_client: AsyncClient):
         assert "assoc_agreement" in food
 
 
+async def _seed_qualifying_suspect_food(
+    authed_client: AsyncClient, food_name: str = "Aged Cheese"
+) -> None:
+    """Seed one food into >=3 symptom episodes so it qualifies for suspect-foods.
+
+    A meal 6h ago carrying ``food_name`` precedes three symptoms in the last 3h;
+    each symptom's 72h look-back contains the meal, so the food lands in three
+    distinct episodes (the ``>= 3`` qualifying floor in ``get_suspect_foods``).
+    """
+    now = datetime.now(timezone.utc)
+    meal_resp = await authed_client.post(
+        "/api/v1/meals",
+        json={
+            "timestamp": (now - timedelta(hours=6)).isoformat(),
+            "raw_description": f"{food_name} plate",
+            "meal_type": "lunch",
+        },
+    )
+    assert meal_resp.status_code == 201
+    meal_id = meal_resp.json()["id"]
+    await authed_client.post(
+        f"/api/v1/meals/{meal_id}/items", json={"items": [{"name": food_name}]}
+    )
+    for i in range(3):
+        resp = await authed_client.post(
+            "/api/v1/symptoms",
+            json={
+                "timestamp": (now - timedelta(hours=i)).isoformat(),
+                "symptom_type": "bloating",
+                "vas_score": 70,
+            },
+        )
+        assert resp.status_code == 201
+
+
+def _find_food(data: dict, food_name: str) -> dict:
+    matches = [f for f in data["foods"] if f["food_name"].lower() == food_name.lower()]
+    assert matches, f"{food_name!r} not in suspect-foods {[f['food_name'] for f in data['foods']]}"
+    return matches[0]
+
+
+@pytest.mark.asyncio
+async def test_suspect_foods_demoted_to_preliminary_when_guardrail_disagrees(
+    authed_client: AsyncClient, monkeypatch
+):
+    """QA-TE-Q1 regression: the FDR-guardrail honesty demotion.
+
+    When the classical guardrail actively DISAGREES with the Bayesian flag
+    (``assoc_agreement is False``), ``get_suspect_foods`` must cap the label at
+    "Preliminary" — a single-method claim we cannot cross-validate is never
+    surfaced as an established signal. Proven deterministically by forcing a
+    HIGH base label and a disagreeing verdict, then asserting the downgrade.
+    """
+    await _seed_qualifying_suspect_food(authed_client)
+
+    # Force a high base label so the demotion has something to override, and a
+    # disagreeing guardrail verdict so the honesty cap must fire.
+    monkeypatch.setattr(
+        "app.routers.insights.evidence_confidence_label",
+        lambda *a, **k: "Strong signal",
+    )
+    monkeypatch.setattr(
+        "app.routers.insights._guardrail_verdict",
+        lambda driver, by_guard: (0.5, False),
+    )
+
+    resp = await authed_client.get("/api/v1/insights/suspect-foods")
+    assert resp.status_code == 200
+    food = _find_food(resp.json(), "Aged Cheese")
+    assert food["assoc_agreement"] is False
+    assert food["confidence_label"] == "Preliminary", (
+        "guardrail disagreement (assoc_agreement is False) must cap the label at "
+        f"'Preliminary', got {food['confidence_label']!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_suspect_foods_not_demoted_when_guardrail_agrees_or_silent(
+    authed_client: AsyncClient, monkeypatch
+):
+    """QA-TE-Q1 control: the cap is conditional on active disagreement.
+
+    Agreement (True) or no verdict (None) must NOT trigger the demotion — the
+    high base label survives. This pins the ``is False`` semantics so a future
+    refactor to a truthiness check (which would also demote the None case) fails.
+    """
+    await _seed_qualifying_suspect_food(authed_client)
+    monkeypatch.setattr(
+        "app.routers.insights.evidence_confidence_label",
+        lambda *a, **k: "Strong signal",
+    )
+
+    for verdict, expected_agreement in ((0.5, True), (None, None)):
+        monkeypatch.setattr(
+            "app.routers.insights._guardrail_verdict",
+            lambda driver, by_guard, _v=verdict, _a=expected_agreement: (_v, _a),
+        )
+        resp = await authed_client.get("/api/v1/insights/suspect-foods")
+        assert resp.status_code == 200
+        food = _find_food(resp.json(), "Aged Cheese")
+        assert food["assoc_agreement"] is expected_agreement
+        assert food["confidence_label"] == "Strong signal", (
+            f"agreement={expected_agreement!r} must NOT demote; "
+            f"got {food['confidence_label']!r}"
+        )
+
+
 # ── POST /protocols/start ────────────────────────────────────────────────
 
 @pytest.mark.asyncio
