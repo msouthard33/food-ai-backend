@@ -42,6 +42,13 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
 
+[tool.ruff.lint.per-file-ignores]
+# The hierarchical-Bayes engine and its tests use conventional linear-algebra
+# names (X design matrix, W weights, Λ precision) where uppercase is the clearer,
+# standard notation; N806 (non-lowercase local) is intentionally allowed there.
+"app/services/hierarchical_trigger.py" = ["N803", "N806"]
+"tests/test_hierarchical_trigger.py" = ["N806"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true
