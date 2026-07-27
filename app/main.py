@@ -12,6 +12,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.config import get_settings
 from app.middleware.audit_log import AuditLogMiddleware
@@ -161,6 +162,18 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Admin-Key"],
 )
+
+# Outermost middleware: trust the platform proxy's X-Forwarded-Proto/-For so
+# request.url (and request.url_for) reflect the public https scheme behind
+# Railway's TLS-terminating edge. Added last => runs first, before routing, so
+# the corrected scheme is in place for every downstream handler and signed-URL
+# builder. Only rewrites when a forwarded header is present, so local http dev
+# is unaffected. See OQ-IOS-SHARE-SCHEME.
+if settings.trust_proxy_headers:
+    app.add_middleware(
+        ProxyHeadersMiddleware,
+        trusted_hosts=settings.forwarded_allow_ips,
+    )
 
 # ---------------------------------------------------------------------------
 # Routers

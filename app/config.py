@@ -20,6 +20,19 @@ class Settings(BaseSettings):
         "http://localhost:19006",
     ]
 
+    # Reverse-proxy / TLS termination
+    # Railway (and most PaaS) terminate TLS at an edge proxy and forward plain
+    # HTTP to the app with X-Forwarded-Proto: https. Trusting that header lets
+    # request.url_for(...) reflect the public https scheme instead of the
+    # internal http hop — critical for signed share/download links on health data.
+    # Enabled by default; the middleware only rewrites when the header is present,
+    # so local http development (no forwarded header) is unaffected.
+    trust_proxy_headers: bool = True
+    # Which upstream IPs are allowed to set forwarded headers. "*" trusts any
+    # peer, which is correct when the app is only reachable behind the platform
+    # proxy (Railway) and never exposed directly.
+    forwarded_allow_ips: str = "*"
+
     # Database
     database_url: str = ""  # REQUIRED — set DATABASE_URL env var
 
