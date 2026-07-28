@@ -7,7 +7,12 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.food import FoodSearchListOut, FoodSearchResult
-from app.services import food_service, meal_decomposition, semantic_search
+from app.services import (
+    breakdown_service,
+    food_service,
+    meal_decomposition,
+    semantic_search,
+)
 
 router = APIRouter(prefix="/api/v1/foods", tags=["foods"])
 
@@ -81,3 +86,34 @@ async def decompose_meal(
     """
     meal_text = str(payload.get("meal_text", "")).strip()
     return await meal_decomposition.decompose_meal_text(db, meal_text)
+
+
+@router.post(
+    "/breakdown",
+    summary="Unified ingredient breakdown — ADR-0003 §1 (curated→AI→heuristic)",
+)
+async def breakdown_food(
+    payload: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Return the unified ADR-0003 §1 breakdown for an input.
+
+    Body: ``{"input": str, "surface": "search"|"capture", "food_id": <uuid|null>}``.
+
+    Resolution precedence is curated → AI → heuristic (ADR-0003 §2). Every
+    ingredient is re-resolved through the canonical alias/normalization layer
+    (§3) so it lands on a canonical KB ``food_id`` or an honest ``null``
+    long-tail marker. The response shape matches the Trigger Preview §4a
+    contract verbatim, so Trigger Preview drops in as a consumer.
+
+    JWT-required, consistent with ``/foods/search``. ``/foods/decompose`` is
+    retained unchanged for existing callers.
+    """
+    input_text = str(payload.get("input", payload.get("meal_text", ""))).strip()
+    surface = str(payload.get("surface", "search"))
+    food_id = payload.get("food_id")
+    food_id = str(food_id) if food_id else None
+    return await breakdown_service.build_breakdown(
+        db, input_text, surface=surface, food_id=food_id
+    )

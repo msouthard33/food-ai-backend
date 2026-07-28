@@ -12,7 +12,12 @@ from app.models.enums import (  # noqa: F401
     SymptomType,
     TriggerStatus,
 )
-from app.models.food import ComponentDefinition, FoodComponentDetail, FoodEntry  # noqa: F401
+from app.models.food import (  # noqa: F401
+    ComponentDefinition,
+    FoodComponentDetail,
+    FoodEntry,
+    FoodRecipeEdge,
+)
 from app.models.food_drug import FoodDrugInteraction  # noqa: F401
 from app.models.meal import AIConversation, Meal, MealItem, MealItemComponent  # noqa: F401
 from app.models.medication import MedicationLog  # noqa: F401
